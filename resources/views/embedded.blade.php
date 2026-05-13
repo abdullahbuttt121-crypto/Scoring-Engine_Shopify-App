@@ -15,6 +15,7 @@
 @section('scripts')
     @parent
     <ui-nav-menu>
+        <a href="/" rel="home">Dashboard</a>
     </ui-nav-menu>
 
     <script>
