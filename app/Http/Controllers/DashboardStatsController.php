@@ -69,6 +69,12 @@ class DashboardStatsController extends Controller
         // Products that exist but have never been scored yet
         $unscoredCount = (clone $base)->whereNull('score_breakdown')->count();
 
+        $outOfStockCount = (clone $base)->where('inventory_quantity', '<=', 0)->count();
+        $lowInventoryCount = (clone $base)
+            ->where('inventory_quantity', '>', 0)
+            ->where('inventory_quantity', '<', 10)
+            ->count();
+
         // ── Average score ─────────────────────────────────────────────────
         // Only average across products that HAVE been scored (score is not null)
         // Only average scored products (score_breakdown not null = has been scored)
@@ -88,6 +94,34 @@ class DashboardStatsController extends Controller
         $lastScoreTime = ProductScoreLog::where('shop_id', $user->id)
             ->max('created_at');
 
+        // Build a compact top reasons list from scored products.
+        $reasonCounts = [];
+        $reasonRows = (clone $base)
+            ->whereNotNull('score_breakdown')
+            ->select('score_breakdown')
+            ->get();
+
+        foreach ($reasonRows as $row) {
+            $reasons = is_array($row->score_breakdown) ? $row->score_breakdown : [];
+            foreach ($reasons as $reason) {
+                $clean = trim((string) preg_replace('/\s*\[[^\]]+\]\s*$/', '', (string) $reason));
+                if ($clean === '') {
+                    continue;
+                }
+                $reasonCounts[$clean] = ($reasonCounts[$clean] ?? 0) + 1;
+            }
+        }
+
+        arsort($reasonCounts);
+        $topReasons = collect($reasonCounts)
+            ->take(5)
+            ->map(fn ($count, $reason) => [
+                'reason' => $reason,
+                'count'  => $count,
+            ])
+            ->values()
+            ->all();
+
         return response()->json([
             'data' => [
                 'total_products'              => $totalProducts,
@@ -96,6 +130,9 @@ class DashboardStatsController extends Controller
                 'medium_priority_products'    => $mediumCount,
                 'low_priority_products'       => $lowCount,
                 'unscored_products'           => $unscoredCount,
+                'out_of_stock_products'       => $outOfStockCount,
+                'low_inventory_products'      => $lowInventoryCount,
+                'top_scoring_reasons'         => $topReasons,
                 'average_score'              => $averageScore,
                 // Format as ISO 8601 string, or null if never synced/scored
                 'last_sync_time'              => $lastSyncTime

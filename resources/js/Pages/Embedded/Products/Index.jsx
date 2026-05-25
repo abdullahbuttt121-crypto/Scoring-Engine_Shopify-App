@@ -44,10 +44,12 @@ import {
     Pagination,
     Popover,
     Select,
+    SkeletonBodyText,
     Spinner,
     Text,
     TextField,
     Thumbnail,
+    Tooltip,
     useIndexResourceState,
     useSetIndexFiltersMode,
 } from '@shopify/polaris';
@@ -55,41 +57,16 @@ import { ImageIcon, RefreshIcon, ViewIcon, EditIcon, DeleteIcon, PlusIcon } from
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePage } from '@inertiajs/react';
 import ScoreDetailModal from './ScoreDetailModal';
+import DashboardStatCard from '@/Components/Scoring/DashboardStatCard';
+import InsightCard from '@/Components/Scoring/InsightCard';
+import PriorityBadge from '@/Components/Scoring/PriorityBadge';
+import ScoreIndicator from '@/Components/Scoring/ScoreIndicator';
+import ProductTable from '@/Components/Products/ProductTable';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Maps score level strings → Polaris Badge tone props.
- * Tones: critical | warning | attention | success | info
- */
-const LEVEL_BADGE_TONE = {
-    critical: 'critical',
-    high:     'attention',
-    medium:   'warning',
-    low:      'success',
-};
-
-/**
- * Maps score level → human-readable label shown in the badge.
- */
-const LEVEL_LABEL = {
-    critical: 'Critical',
-    high:     'High',
-    medium:   'Medium',
-    low:      'Low',
-};
-
-/**
- * Maps score level → the hex colour used in the mini score bar.
- */
-const LEVEL_BAR_COLOR = {
-    critical: '#d72c0d',
-    high:     '#e08b00',
-    medium:   '#f3c94b',
-    low:      '#21a67a',
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCORING RULES — constants (mirrors ScoringRule PHP model)
@@ -171,50 +148,6 @@ function formatDate(isoString) {
     if (!isoString) return '–';
     const d = new Date(isoString);
     return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: A single stat card used in the stats grid
-// ─────────────────────────────────────────────────────────────────────────────
-function StatCard({ label, value, tone }) {
-    return (
-        <Card>
-            <BlockStack gap="100">
-                <Text variant="bodySm" as="p" tone="subdued">{label}</Text>
-                <Text
-                    variant="headingLg"
-                    as="p"
-                    tone={tone || 'base'}
-                    fontWeight="bold"
-                >
-                    {value ?? '–'}
-                </Text>
-            </BlockStack>
-        </Card>
-    );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENT: Score bar + number  (visual indicator in the table)
-// ─────────────────────────────────────────────────────────────────────────────
-function ScoreBar({ score }) {
-    if (score === null || score === undefined) {
-        return <Text tone="subdued" as="span">Not scored</Text>;
-    }
-    const level    = levelFromScore(score);
-    const barColor = LEVEL_BAR_COLOR[level] || '#8c9196';
-    // Bar fills up to 100% visually — scores above 100 (critical) pin the bar full
-    const pct      = Math.min(score, 100);
-
-    return (
-        <InlineStack gap="200" blockAlign="center" wrap={false}>
-            <div style={{ width: 56, height: 6, background: '#e4e5e7', borderRadius: 3, overflow: 'hidden', flexShrink: 0 }}>
-                <div style={{ width: `${pct}%`, height: '100%', background: barColor, borderRadius: 3 }} />
-            </div>
-            {/* Show score as a percentage — e.g. 65% or 112% for critical */}
-            <Text variant="bodyMd" as="span" fontWeight="semibold">{score}%</Text>
-        </InlineStack>
-    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -506,19 +439,13 @@ export default function ProductScoringDashboard() {
         setProductsLoading(true);
         setError(null);
         try {
-            // Build the route with all active filters.
-            // route() is from Ziggy — generates URLs like /products?shop=...&search=...
             const params = {
                 ...query,
-                page:           currentPage,
-                per_page:       10,
-                sort_by:        sortBy,
-                sort_direction: sortDirection,
+                page: 1,
+                per_page: 5,
+                sort_by: 'score',
+                sort_direction: 'desc',
             };
-            // Only add filter params if they have a value (avoids sending empty strings)
-            if (search)      params.search      = search;
-            if (scoreLevel)  params.score_level = scoreLevel;
-            if (statusFilter) params.status     = statusFilter;
 
             const response = await fetch(route('products.index', params));
             if (!response.ok) throw new Error('Products request failed');
@@ -532,7 +459,7 @@ export default function ProductScoringDashboard() {
         } finally {
             setProductsLoading(false);
         }
-    }, [query, currentPage, search, scoreLevel, statusFilter, sortBy, sortDirection]);
+    }, [query]);
 
     /**
      * Trigger a full product sync from Shopify (POST /products/sync).
@@ -684,45 +611,28 @@ export default function ProductScoringDashboard() {
         fetchRules();
     }, []);
 
-    // Reload products whenever filters, sort, or page changes
+    // Reload products when refresh is requested (sync/rescore actions)
     useEffect(() => {
         fetchProducts();
-    }, [filterVersion, currentPage, sortBy, sortDirection]);
+    }, [filterVersion]);
 
-    // Debounced search: wait 400 ms before re-fetching
-    useEffect(() => {
-        const t = setTimeout(() => {
-            setCurrentPage(1);
-            setFilterVersion(v => v + 1);
-        }, 400);
-        return () => clearTimeout(t);
-    }, [search]);
+    const topReason = useMemo(() => {
+        const reasonMap = new Map();
 
-    // Immediate filter re-fetch for dropdown filters
-    useEffect(() => {
-        setCurrentPage(1);
-        setFilterVersion(v => v + 1);
-    }, [scoreLevel, statusFilter]);
+        products.forEach((product) => {
+            const reason = (product.score_breakdown || product.score_info?.reasons || [])[0];
+            if (!reason) return;
+            const key = reason.length > 80 ? `${reason.substring(0, 80)}...` : reason;
+            reasonMap.set(key, (reasonMap.get(key) || 0) + 1);
+        });
 
-    // ─────────────────────────────────────────────────────────────────────
-    // SORT HANDLER for IndexFilters
-    // ─────────────────────────────────────────────────────────────────────
-    const handleSort = useCallback((selected) => {
-        setSortSelected(selected);
-        const [field, dir] = (selected[0] || 'score desc').split(' ');
-        setSortBy(field);
-        setSortDirection(dir);
-    }, []);
+        const ranked = [...reasonMap.entries()].sort((a, b) => b[1] - a[1]);
+        return ranked[0] || null;
+    }, [products]);
 
-    const clearFilters = useCallback(() => {
-        setSearch('');
-        setScoreLevel('');
-        setStatusFilter('');
-        setCurrentPage(1);
-        setFilterVersion(v => v + 1);
-    }, []);
-
-    const hasActiveFilters = search || scoreLevel || statusFilter;
+    const attentionCount =
+        (stats?.critical_priority_products || 0) +
+        (stats?.high_priority_products || 0);
 
     // ─────────────────────────────────────────────────────────────────────
     // INDEXFILTERS — sort options, filters, applied filters
@@ -880,26 +790,22 @@ export default function ProductScoringDashboard() {
 
                 {/* Score bar */}
                 <IndexTable.Cell>
-                    <ScoreBar score={score} />
+                    <ScoreIndicator score={score} compact />
                 </IndexTable.Cell>
 
                 {/* Level badge */}
                 <IndexTable.Cell>
-                    {level ? (
-                        <Badge tone={LEVEL_BADGE_TONE[level]}>
-                            {LEVEL_LABEL[level] || level}
-                        </Badge>
-                    ) : (
-                        <Text tone="subdued" as="span">–</Text>
-                    )}
+                    <PriorityBadge level={level} />
                 </IndexTable.Cell>
 
                 {/* Top reason (truncated) */}
                 <IndexTable.Cell>
                     {topReason ? (
-                        <Text variant="bodySm" tone="subdued" as="span">
-                            {topReason.length > 50 ? topReason.substring(0, 50) + '…' : topReason}
-                        </Text>
+                        <Tooltip content={topReason}>
+                            <Text variant="bodySm" tone="subdued" as="span">
+                                {topReason.length > 58 ? `${topReason.substring(0, 58)}...` : topReason}
+                            </Text>
+                        </Tooltip>
                     ) : (
                         <Text tone="subdued" as="span">–</Text>
                     )}
@@ -929,8 +835,7 @@ export default function ProductScoringDashboard() {
     // RENDER
     // ─────────────────────────────────────────────────────────────────────
     return (
-        <div style={{ padding: '48px' }}>
-            <Box paddingInline="800">
+        <Box paddingInline="600">
                 {/* Product Score Detail Modal */}
                 <ScoreDetailModal
                     open={detailProductId !== null}
@@ -973,6 +878,12 @@ export default function ProductScoringDashboard() {
                     }}
                     secondaryActions={[
                         {
+                            content: 'Scoring Rules',
+                            onAction: () => {
+                                window.location.href = route('scoring-rules.page', { ...query });
+                            },
+                        },
+                        {
                             content:  'Recalculate All Scores',
                             loading:  rescoreLoading,
                             onAction: handleRescoreAll,
@@ -1001,59 +912,96 @@ export default function ProductScoringDashboard() {
                         {/* ── Stats grid ────────────────────────────────────── */}
                         <Card>
                             <BlockStack gap="300">
-                                <Text variant="headingSm" as="h2">Overview</Text>
+                                <InlineStack align="space-between" blockAlign="center">
+                                    <Text variant="headingSm" as="h2">Overview</Text>
+                                    <Text variant="bodySm" tone="subdued" as="p">
+                                        Snapshot of current product health
+                                    </Text>
+                                </InlineStack>
                                 {statsLoading ? (
-                                    <InlineStack align="center" blockAlign="center">
-                                        <Spinner size="small" />
-                                    </InlineStack>
+                                    <Box padding="300">
+                                        <SkeletonBodyText lines={4} />
+                                    </Box>
                                 ) : (
                                     <div style={{
                                         display: 'grid',
-                                        gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-                                        gap: '12px',
+                                        gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+                                        gap: 12,
                                     }}>
-                                        <StatCard label="Total Products"       value={stats?.total_products} />
-                                        <StatCard label="Critical Priority"    value={stats?.critical_priority_products} tone="critical" />
-                                        <StatCard label="High Priority"        value={stats?.high_priority_products}     tone="caution" />
-                                        <StatCard label="Medium Priority"      value={stats?.medium_priority_products}   tone="magic" />
-                                        <StatCard label="Low Priority"         value={stats?.low_priority_products}      tone="success" />
-                                        <StatCard label="Average Score"        value={stats?.average_score != null ? `${stats.average_score} pts` : null} />
-                                        <StatCard label="Last Sync"            value={formatDate(stats?.last_sync_time)} />
-                                        <StatCard label="Last Score Calc"      value={formatDate(stats?.last_score_calculation_time)} />
+                                        <DashboardStatCard label="Total Products" value={stats?.total_products} helper="Products currently synced" />
+                                        <DashboardStatCard label="Critical Priority" value={stats?.critical_priority_products} helper="Immediate action required" tone="critical" emphasisLabel="Urgent" />
+                                        <DashboardStatCard label="High Priority" value={stats?.high_priority_products} helper="Requires attention soon" tone="warning" emphasisLabel="High" />
+                                        <DashboardStatCard label="Medium Priority" value={stats?.medium_priority_products} helper="Monitor and optimise" tone="caution" />
+                                        <DashboardStatCard label="Low Priority" value={stats?.low_priority_products} helper="Healthy products" tone="success" />
+                                        <DashboardStatCard label="Average Score" value={stats?.average_score != null ? `${stats.average_score} pts` : '–'} helper="Across scored products" />
+                                        <DashboardStatCard label="Last Product Sync" value={formatDate(stats?.last_sync_time)} helper="Last successful product sync" />
+                                        <DashboardStatCard label="Last Score Calculation" value={formatDate(stats?.last_score_calculation_time)} helper="Last scoring run time" />
                                     </div>
                                 )}
                             </BlockStack>
                         </Card>
 
-                        {/* ── Product ranking table ─────────────────────────── */}
-                        <Card padding="0">
-                            <IndexFilters
-                                queryValue={search}
-                                queryPlaceholder="Search by title, vendor, tags…"
-                                onQueryChange={val => setSearch(val)}
-                                onQueryClear={() => setSearch('')}
-                                sortOptions={sortOptions}
-                                sortSelected={sortSelected}
-                                onSort={handleSort}
-                                filters={filtersConfig}
-                                appliedFilters={appliedFilters}
-                                onClearAll={clearFilters}
-                                mode={mode}
-                                setMode={setMode}
-                                tabs={[]}
-                                cancelAction={{
-                                    onAction: clearFilters,
-                                    disabled: !hasActiveFilters,
-                                }}
-                                selected={0}
+                        <div style={{
+                            display: 'grid',
+                            gap: 12,
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        }}>
+                            <InsightCard
+                                title="Products Needing Attention"
+                                body={`${attentionCount} products are currently High or Critical priority.`}
+                                tone={attentionCount > 0 ? 'critical' : 'success'}
+                                footer="Focus on these first for the fastest quality lift."
                             />
+                            <InsightCard
+                                title="Score Distribution"
+                                body={`Critical ${stats?.critical_priority_products || 0} • High ${stats?.high_priority_products || 0} • Medium ${stats?.medium_priority_products || 0} • Low ${stats?.low_priority_products || 0}`}
+                                footer="Based on the latest score calculation."
+                            />
+                            <InsightCard
+                                title="Most Common Issue"
+                                body={topReason ? `${topReason[0]}` : 'No scoring reasons available yet.'}
+                                footer={topReason ? `Appears in ${topReason[1]} product(s) on this page.` : 'Run scoring to surface issue patterns.'}
+                            />
+                            <InsightCard
+                                title="Sync and Scoring Status"
+                                body={
+                                    stats?.last_sync_time
+                                        ? `Synced ${formatDate(stats?.last_sync_time)} and scored ${formatDate(stats?.last_score_calculation_time)}.`
+                                        : 'No successful sync yet. Start with Sync Products.'
+                                }
+                                footer="Use Sync Products and Recalculate All Scores to refresh insights."
+                            />
+                        </div>
+
+                        {/* ── Top attention products table ───────────────────── */}
+                        <Card padding="0">
+                            <Box padding="400">
+                                <InlineStack align="space-between" blockAlign="center">
+                                    <BlockStack gap="100">
+                                        <Text variant="headingSm" as="h2">Top Products Needing Attention</Text>
+                                        <Text variant="bodySm" tone="subdued" as="p">
+                                            Showing the 5 highest scoring products that need merchant attention.
+                                        </Text>
+                                    </BlockStack>
+                                    <Button
+                                        onClick={() => {
+                                            window.location.href = route('products-analytics.page', { ...query });
+                                        }}
+                                    >
+                                        View all products
+                                    </Button>
+                                </InlineStack>
+                            </Box>
                             {productsLoading ? (
                                 /* Loading state */
                                 <Box padding="800">
-                                    <InlineStack align="center" blockAlign="center" gap="300">
-                                        <Spinner size="large" />
-                                        <Text tone="subdued">Loading products…</Text>
-                                    </InlineStack>
+                                    <BlockStack gap="300">
+                                        <InlineStack align="center" blockAlign="center" gap="200">
+                                            <Spinner size="large" />
+                                            <Text tone="subdued">Loading products and scoring data...</Text>
+                                        </InlineStack>
+                                        <SkeletonBodyText lines={3} />
+                                    </BlockStack>
                                 </Box>
                             ) : products.length === 0 ? (
                                 /* Empty state */
@@ -1075,34 +1023,28 @@ export default function ProductScoringDashboard() {
                             ) : (
                                 /* Product table */
                                 <div className="ProductsTableWrap">
-                                    <IndexTable
-                                        resourceName={{ singular: 'product', plural: 'products' }}
-                                        itemCount={products.length}
-                                        selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
-                                        onSelectionChange={handleSelectionChange}
-                                        headings={columnHeadings}
+                                    {error && (
+                                        <Box padding="300">
+                                            <Banner
+                                                tone="critical"
+                                                title="Could not refresh product table"
+                                                action={{ content: 'Retry', onAction: fetchProducts }}
+                                            >
+                                                <p>{error}</p>
+                                            </Banner>
+                                        </Box>
+                                    )}
+                                    <ProductTable
+                                        products={products}
+                                        shopDomain={shopDomain}
+                                        onRecalculate={handleRescoreOne}
+                                        onViewDetail={(id) => setDetailProductId(id)}
+                                        rowRescoreLoading={rowRescoreLoading}
                                         selectable={false}
-                                    >
-                                        {rowMarkup}
-                                    </IndexTable>
+                                    />
                                 </div>
                             )}
                         </Card>
-
-                        {/* ── Pagination ─────────────────────────────────────── */}
-                        {paginationMeta && paginationMeta.total > 0 && (
-                            <BlockStack gap="200">
-                                <InlineStack align="center">
-                                    <Pagination
-                                        hasPrevious={currentPage > 1}
-                                        onPrevious={() => setCurrentPage(p => p - 1)}
-                                        hasNext={currentPage < paginationMeta.last_page}
-                                        onNext={() => setCurrentPage(p => p + 1)}
-                                        label={`Page ${currentPage} of ${paginationMeta.last_page}`}
-                                    />
-                                </InlineStack>
-                            </BlockStack>
-                        )}
 
                         <style>{`
                             .ProductsTableWrap [class*="Polaris-IndexTable__ScrollBarContainer"] {
@@ -1117,8 +1059,18 @@ export default function ProductScoringDashboard() {
 
                     </BlockStack>
                 </Page>
-            </Box>
-        </div>
+
+                <style>{`
+                    .ProductsTableWrap [class*="Polaris-IndexTable__ScrollBarContainer"] {
+                        display: none !important;
+                    }
+
+                    .ProductsTableWrap [class*="Polaris-IndexTable__ScrollLeft"],
+                    .ProductsTableWrap [class*="Polaris-IndexTable__ScrollRight"] {
+                        display: none !important;
+                    }
+                `}</style>
+        </Box>
 
     );
 }

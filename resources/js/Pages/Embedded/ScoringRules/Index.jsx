@@ -54,6 +54,7 @@ import {
     Page,
     Pagination,
     Select,
+    SkeletonBodyText,
     Spinner,
     Text,
     TextField,
@@ -72,6 +73,8 @@ import {
 } from '@shopify/polaris-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePage } from '@inertiajs/react';
+import DashboardStatCard from '@/Components/Scoring/DashboardStatCard';
+import InsightCard from '@/Components/Scoring/InsightCard';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — must stay in sync with ScoringRule PHP model constants
@@ -505,6 +508,15 @@ export default function ScoringRulesIndex() {
         global: rules.filter(rule => rule.is_global).length,
     }), [rules]);
 
+    const ruleHealth = useMemo(() => {
+        if (summary.total === 0) return null;
+        const activePct = Math.round((summary.active / summary.total) * 100);
+        return {
+            activePct,
+            statusText: activePct >= 70 ? 'Healthy coverage' : 'Needs activation review',
+        };
+    }, [summary]);
+
     // ── Load rules on mount ───────────────────────────────────────────────
     const fetchRules = useCallback(async () => {
         setLoading(true);
@@ -832,8 +844,7 @@ export default function ScoringRulesIndex() {
     // ── Render ────────────────────────────────────────────────────────────
 
     return (
-        
-        <Box paddingInline="300">
+        <Box paddingInline="600" paddingBlock="500">
             {/* Form modal (create + edit) */}
             <RuleFormModal
                 open={formOpen}
@@ -860,6 +871,19 @@ export default function ScoringRulesIndex() {
                     icon:    PlusIcon,
                     onAction: openCreate,
                 }}
+                secondaryActions={[
+                    {
+                        content: 'Open Product Dashboard',
+                        onAction: () => {
+                            window.location.href = route('scoring', { ...query });
+                        },
+                    },
+                    {
+                        content: 'Refresh rules',
+                        icon: RefreshIcon,
+                        onAction: fetchRules,
+                    },
+                ]}
             >
                 <BlockStack gap="400">
 
@@ -867,40 +891,38 @@ export default function ScoringRulesIndex() {
                         <BlockStack gap="300">
                             <InlineStack align="space-between" blockAlign="center">
                                 <Text variant="headingSm" as="h2">Rules Overview</Text>
-                                <Button icon={RefreshIcon} onClick={fetchRules}>Refresh</Button>
+                                <Text variant="bodySm" tone="subdued" as="p">
+                                    Maintain reliable and explainable scoring logic
+                                </Text>
                             </InlineStack>
-                            <div style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                                gap: 12,
-                            }}>
-                                <Card>
-                                    <BlockStack gap="100">
-                                        <Text tone="subdued" variant="bodySm" as="p">Total rules</Text>
-                                        <Text variant="headingLg" as="p">{summary.total}</Text>
-                                    </BlockStack>
-                                </Card>
-                                <Card>
-                                    <BlockStack gap="100">
-                                        <Text tone="subdued" variant="bodySm" as="p">Active</Text>
-                                        <Text variant="headingLg" as="p" tone="success">{summary.active}</Text>
-                                    </BlockStack>
-                                </Card>
-                                <Card>
-                                    <BlockStack gap="100">
-                                        <Text tone="subdued" variant="bodySm" as="p">Inactive</Text>
-                                        <Text variant="headingLg" as="p" tone="subdued">{summary.inactive}</Text>
-                                    </BlockStack>
-                                </Card>
-                                <Card>
-                                    <BlockStack gap="100">
-                                        <Text tone="subdued" variant="bodySm" as="p">Global defaults</Text>
-                                        <Text variant="headingLg" as="p" tone="info">{summary.global}</Text>
-                                    </BlockStack>
-                                </Card>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                                <DashboardStatCard label="Total Rules" value={summary.total} helper="All available scoring rules" />
+                                <DashboardStatCard label="Active Rules" value={summary.active} helper="Rules currently used during scoring" tone="success" emphasisLabel="Live" />
+                                <DashboardStatCard label="Inactive Rules" value={summary.inactive} helper="Stored but ignored by scoring" tone="subdued" />
+                                <DashboardStatCard label="Global Defaults" value={summary.global} helper="Shared default rules" tone="info" />
                             </div>
                         </BlockStack>
                     </Card>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+                        <InsightCard
+                            title="Activation Health"
+                            body={ruleHealth ? `${ruleHealth.activePct}% of rules are active.` : 'No rules available yet.'}
+                            tone={ruleHealth && ruleHealth.activePct >= 70 ? 'success' : 'warning'}
+                            footer={ruleHealth?.statusText || 'Create your first rule to enable scoring.'}
+                        />
+                        <InsightCard
+                            title="Rule Sources"
+                            body={`${summary.global} global defaults and ${summary.total - summary.global} custom shop rules.`}
+                            footer="Global rules are shared, custom rules belong only to your shop."
+                        />
+                        <InsightCard
+                            title="Rule Changes"
+                            body={rulesChanged ? 'Unapplied changes detected. Recalculate all scores.' : 'No pending changes detected.'}
+                            tone={rulesChanged ? 'warning' : 'success'}
+                            footer="Use Recalculate all scores after create/update/delete actions."
+                        />
+                    </div>
 
                     {/* Feedback banner */}
                     {feedback && (
@@ -934,9 +956,10 @@ export default function ScoringRulesIndex() {
                     {/* Rules table */}
                     <Card padding="0">
                         <Box padding="400">
-                            <BlockStack gap="00">
+                            <BlockStack gap="300">
                                 <InlineStack align="space-between" blockAlign="center">
                                     <Text variant="headingSm" as="h2">Rule Library</Text>
+                                    <Text variant="bodySm" tone="subdued" as="p">{filteredRules.length} matching rule(s)</Text>
                                 </InlineStack>
                                 <IndexFilters
                                     queryValue={searchValue}
@@ -968,13 +991,18 @@ export default function ScoringRulesIndex() {
                         <Divider />
                         {loading ? (
                             <Box padding="600">
-                                <InlineStack align="center">
-                                    <Spinner size="large" />
-                                </InlineStack>
+                                <BlockStack gap="300">
+                                    <InlineStack align="center">
+                                        <Spinner size="large" />
+                                    </InlineStack>
+                                    <SkeletonBodyText lines={3} />
+                                </BlockStack>
                             </Box>
                         ) : error ? (
                             <Box padding="600">
-                                <Banner tone="critical"><p>{error}</p></Banner>
+                                <Banner tone="critical" action={{ content: 'Retry', onAction: fetchRules }}>
+                                    <p>{error}</p>
+                                </Banner>
                             </Box>
                         ) : filteredRules.length === 0 ? (
                             <EmptyState

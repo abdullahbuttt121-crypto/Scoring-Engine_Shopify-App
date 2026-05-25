@@ -17,6 +17,10 @@ Route::group(['middleware' => ['verify.embedded', 'verify.shopify']], function (
     // GET /scoring  → loads the React Products/Index.jsx page
     Route::get('/scoring', [ProductScoringDashboardController::class, 'index'])->name('scoring');
 
+    // ── Product Analytics (Inertia page) ───────────────────────────────────
+    // GET /products-analytics → loads the React Products/Analytics.jsx page
+    Route::get('/products-analytics', [ProductScoringDashboardController::class, 'analyticsPage'])->name('products-analytics.page');
+
     // ── Product sync ──────────────────────────────────────────────────────
     // POST /products/sync  → queues SyncShopifyProductsJob
     Route::post('/products/sync', [ProductSyncController::class, 'store'])->name('products.sync');

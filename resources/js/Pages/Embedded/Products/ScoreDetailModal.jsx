@@ -39,37 +39,25 @@ import {
     Badge,
     Banner,
     BlockStack,
+    Box,
     Button,
-    Card,
     DataTable,
+    Divider,
     InlineStack,
     Modal,
     SkeletonBodyText,
     SkeletonDisplayText,
-    Spinner,
     Text,
     Thumbnail,
 } from '@shopify/polaris';
 import { ImageIcon, RefreshIcon } from '@shopify/polaris-icons';
 import { useCallback, useEffect, useState } from 'react';
+import PriorityBadge from '@/Components/Scoring/PriorityBadge';
+import ScoreIndicator from '@/Components/Scoring/ScoreIndicator';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — mirrors ProductScore.php level thresholds
 // ─────────────────────────────────────────────────────────────────────────────
-
-const LEVEL_BADGE_TONE = {
-    critical: 'critical',
-    high:     'attention',
-    medium:   'warning',
-    low:      'success',
-};
-
-const LEVEL_LABEL = {
-    critical: 'Critical Priority',
-    high:     'High Priority',
-    medium:   'Medium Priority',
-    low:      'Low Priority',
-};
 
 const LEVEL_BAR_COLOR = {
     critical: '#d72c0d',
@@ -215,7 +203,6 @@ function stripPoints(reason) {
 // Score card — coloured panel that shows score + bar prominently
 // ─────────────────────────────────────────────────────────────────────────────
 function ScoreCard({ score, level, calculatedAt }) {
-    const pct      = Math.min(((score || 0) / 120) * 100, 100);
     const color    = LEVEL_BAR_COLOR[level] || '#8c9196';
     const bgAlpha  = `${color}18`;
     const borderCl = `${color}55`;
@@ -230,17 +217,14 @@ function ScoreCard({ score, level, calculatedAt }) {
             <InlineStack align="space-between" blockAlign="center" wrap={false}>
                 <BlockStack gap="050">
                     <Text variant="heading2xl" as="p" fontWeight="bold">{score ?? 0} pts</Text>
+                    <ScoreIndicator score={score} />
                     {calculatedAt && (
                         <Text variant="bodySm" tone="subdued" as="p">
                             Last calculated: {formatDate(calculatedAt)}
                         </Text>
                     )}
                 </BlockStack>
-                {level && (
-                    <Badge tone={LEVEL_BADGE_TONE[level]} size="large">
-                        {LEVEL_LABEL[level] || level}
-                    </Badge>
-                )}
+                <PriorityBadge level={level} />
             </InlineStack>
 
             {/* Score bar */}
@@ -250,7 +234,7 @@ function ScoreCard({ score, level, calculatedAt }) {
                     background: '#e4e5e7', borderRadius: 5, overflow: 'hidden',
                 }}>
                     <div style={{
-                        width: `${pct}%`, height: '100%',
+                        width: `${Math.min(((score || 0) / 120) * 100, 100)}%`, height: '100%',
                         background: color, borderRadius: 5,
                         transition: 'width 0.5s ease',
                     }} />
@@ -303,7 +287,6 @@ function ReasonRow({ reason, index }) {
 // Compact recommendation card (replaces heavy Banner)
 // ─────────────────────────────────────────────────────────────────────────────
 const REC_COLORS = { critical: '#d72c0d', warning: '#e08b00', info: '#0070f3' };
-const REC_ICONS  = { critical: '🔴', warning: '⚠️', info: 'ℹ️' };
 function RecCard({ text, tone }) {
     const color = REC_COLORS[tone] || REC_COLORS.info;
     return (
@@ -313,7 +296,14 @@ function RecCard({ text, tone }) {
             borderLeft: `4px solid ${color}`,
             borderRadius: 8, padding: '10px 14px',
         }}>
-            <span style={{ fontSize: 15, lineHeight: 1.4, flexShrink: 0 }}>{REC_ICONS[tone] || 'ℹ️'}</span>
+            <span style={{
+                width: 10,
+                height: 10,
+                marginTop: 5,
+                borderRadius: '50%',
+                background: color,
+                flexShrink: 0,
+            }} />
             <Text variant="bodySm" as="p">{text}</Text>
         </div>
     );
@@ -452,7 +442,11 @@ export default function ScoreDetailModal({ open, productId, query, onClose, onRe
 
                 {/* ── Error state ────────────────────────────────────── */}
                 {!loading && error && (
-                    <Banner tone="critical" onDismiss={() => setError(null)}>
+                    <Banner
+                        tone="critical"
+                        onDismiss={() => setError(null)}
+                        action={productId ? { content: 'Retry', onAction: fetchDetail } : undefined}
+                    >
                         <p>{error}</p>
                     </Banner>
                 )}
@@ -462,69 +456,57 @@ export default function ScoreDetailModal({ open, productId, query, onClose, onRe
                     <BlockStack gap="500">
 
                         {/* ── 1. Product header ───────────────────────── */}
-                        <div style={{
-                            display: 'flex', gap: 16, alignItems: 'flex-start',
-                            padding: '0 0 20px', borderBottom: '1px solid #e1e3e5',
-                        }}>
-                            <Thumbnail
-                                source={product.image_url || ImageIcon}
-                                alt={product.title}
-                                size="large"
-                            />
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                                <Text variant="headingMd" as="h2">{product.title}</Text>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
-                                    <Badge
-                                        tone={
-                                            product.status === 'active'   ? 'success' :
-                                            product.status === 'archived' ? 'critical' : 'warning'
-                                        }
-                                    >
-                                        {product.status
-                                            ? product.status.charAt(0).toUpperCase() + product.status.slice(1)
-                                            : '–'}
-                                    </Badge>
-                                    {product.vendor && (
-                                        <Text variant="bodySm" tone="subdued" as="span">{product.vendor}</Text>
-                                    )}
-                                </div>
+                        <BlockStack gap="300">
+                            <InlineStack gap="300" blockAlign="start" wrap={false}>
+                                <Thumbnail
+                                    source={product.image_url || ImageIcon}
+                                    alt={product.title}
+                                    size="large"
+                                />
+                                <BlockStack gap="100">
+                                    <Text variant="headingMd" as="h2">{product.title}</Text>
+                                    <InlineStack gap="150" blockAlign="center">
+                                        <Badge
+                                            tone={
+                                                product.status === 'active' ? 'success' :
+                                                product.status === 'archived' ? 'critical' : 'warning'
+                                            }
+                                        >
+                                            {product.status
+                                                ? product.status.charAt(0).toUpperCase() + product.status.slice(1)
+                                                : 'Unknown'}
+                                        </Badge>
+                                        {product.vendor ? <Text variant="bodySm" tone="subdued" as="span">{product.vendor}</Text> : null}
+                                    </InlineStack>
+                                </BlockStack>
+                            </InlineStack>
 
-                                {/* Stat pills row */}
-                                <div style={{
-                                    display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap',
-                                }}>
-                                    {[
-                                        {
-                                            label: 'Price',
-                                            value: product.price != null ? `$${parseFloat(product.price).toFixed(2)}` : '–',
-                                            warn: false,
-                                        },
-                                        {
-                                            label: 'Inventory',
-                                            value: `${product.inventory_quantity ?? '–'} units`,
-                                            warn: product.inventory_quantity === 0   ? 'critical'
-                                                : product.inventory_quantity < 10    ? 'caution'
-                                                : null,
-                                        },
-                                        { label: 'Last updated', value: formatDateShort(product.shopify_updated_at) },
-                                        { label: 'Last synced',  value: formatDateShort(product.synced_at) },
-                                    ].map(stat => (
-                                        <div key={stat.label} style={{
-                                            background: '#f6f6f7', borderRadius: 8,
-                                            padding: '6px 12px', minWidth: 80,
-                                        }}>
+                            <div style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                                gap: 8,
+                            }}>
+                                {[
+                                    { label: 'Price', value: product.price != null ? `$${parseFloat(product.price).toFixed(2)}` : '–' },
+                                    {
+                                        label: 'Inventory',
+                                        value: `${product.inventory_quantity ?? '–'} units`,
+                                        tone: product.inventory_quantity === 0 ? 'critical' : product.inventory_quantity < 10 ? 'caution' : undefined,
+                                    },
+                                    { label: 'Last Updated', value: formatDateShort(product.shopify_updated_at) },
+                                    { label: 'Last Synced', value: formatDateShort(product.synced_at) },
+                                ].map((stat) => (
+                                    <Box key={stat.label} background="bg-surface-secondary" padding="200" borderRadius="200">
+                                        <BlockStack gap="050">
                                             <Text variant="bodySm" tone="subdued" as="p">{stat.label}</Text>
-                                            <Text
-                                                variant="bodyMd" fontWeight="semibold" as="p"
-                                                tone={stat.warn || undefined}
-                                            >
-                                                {stat.value}
-                                            </Text>
-                                        </div>
-                                    ))}
-                                </div>
+                                            <Text variant="bodyMd" fontWeight="semibold" tone={stat.tone} as="p">{stat.value}</Text>
+                                        </BlockStack>
+                                    </Box>
+                                ))}
                             </div>
-                        </div>
+                        </BlockStack>
+
+                        <Divider />
 
                         {/* ── 2. Score card ────────────────────────────── */}
                         {score !== null ? (

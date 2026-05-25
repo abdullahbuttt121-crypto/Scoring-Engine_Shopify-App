@@ -38,4 +38,14 @@ class ProductScoringDashboardController extends Controller
     {
         return $this->render('ScoringRules/Index');
     }
+
+    /**
+     * Renders the full product analytics page.
+     * Route: GET /products-analytics
+     * Loads: resources/js/Pages/Embedded/Products/Analytics.jsx
+     */
+    public function analyticsPage()
+    {
+        return $this->render('Products/Analytics');
+    }
 }

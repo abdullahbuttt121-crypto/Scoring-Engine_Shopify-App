@@ -16,6 +16,7 @@
     @parent
     <ui-nav-menu>
         <a href="/scoring" rel="home">Product Scoring</a>
+        <a href="/products-analytics">Product Analytics</a>
         <a href="/scoring-rules-page">Scoring Rules</a>
     </ui-nav-menu>
 

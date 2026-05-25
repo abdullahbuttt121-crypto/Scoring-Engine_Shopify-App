@@ -30,8 +30,9 @@ class ProductController extends Controller
      *   search          string  Free-text search on title/handle/vendor/tags
      *   score_level     string  Filter by level: low | medium | high | critical
      *   status          string  Filter by Shopify status: active | draft | archived
-     *   vendor          string  Filter by vendor name (exact)
+    *   vendor          string  Filter by vendor name
      *   product_type    string  Filter by product type (exact)
+    *   inventory_issue string  out_of_stock | low_stock | no_issue
      *   inventory_min   int     Minimum inventory quantity
      *   inventory_max   int     Maximum inventory quantity
      *   price_min       float   Minimum price
@@ -192,11 +193,23 @@ class ProductController extends Controller
         }
 
         if ($request->filled('vendor')) {
-            $query->where('vendor', $request->input('vendor'));
+            $query->where('vendor', 'LIKE', '%' . $request->input('vendor') . '%');
         }
 
         if ($request->filled('product_type')) {
             $query->where('product_type', $request->input('product_type'));
+        }
+
+        if ($request->filled('inventory_issue')) {
+            $issue = $request->input('inventory_issue');
+            if ($issue === 'out_of_stock') {
+                $query->where('inventory_quantity', '<=', 0);
+            } elseif ($issue === 'low_stock') {
+                $query->where('inventory_quantity', '>', 0)
+                    ->where('inventory_quantity', '<', 10);
+            } elseif ($issue === 'no_issue') {
+                $query->where('inventory_quantity', '>=', 10);
+            }
         }
 
         // ── Numeric range filters ─────────────────────────────────────────
@@ -254,5 +267,10 @@ class ProductController extends Controller
         $sortDir = in_array($sortDir, ['asc', 'desc']) ? $sortDir : 'desc';
 
         $query->orderBy($sortBy, $sortDir);
+
+        // Keep highest-risk ordering deterministic when scores are equal.
+        if ($sortBy === 'score') {
+            $query->orderByRaw('COALESCE(shopify_updated_at, synced_at, created_at) DESC');
+        }
     }
 }
