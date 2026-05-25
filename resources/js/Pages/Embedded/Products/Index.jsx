@@ -1041,6 +1041,10 @@ export default function ProductScoringDashboard() {
                                 mode={mode}
                                 setMode={setMode}
                                 tabs={[]}
+                                cancelAction={{
+                                    onAction: clearFilters,
+                                    disabled: !hasActiveFilters,
+                                }}
                                 selected={0}
                             />
                             {productsLoading ? (
@@ -1070,16 +1074,18 @@ export default function ProductScoringDashboard() {
                                 </EmptyState>
                             ) : (
                                 /* Product table */
-                                <IndexTable
-                                    resourceName={{ singular: 'product', plural: 'products' }}
-                                    itemCount={products.length}
-                                    selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
-                                    onSelectionChange={handleSelectionChange}
-                                    headings={columnHeadings}
-                                    selectable={false}
-                                >
-                                    {rowMarkup}
-                                </IndexTable>
+                                <div className="ProductsTableWrap">
+                                    <IndexTable
+                                        resourceName={{ singular: 'product', plural: 'products' }}
+                                        itemCount={products.length}
+                                        selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
+                                        onSelectionChange={handleSelectionChange}
+                                        headings={columnHeadings}
+                                        selectable={false}
+                                    >
+                                        {rowMarkup}
+                                    </IndexTable>
+                                </div>
                             )}
                         </Card>
 
@@ -1095,13 +1101,19 @@ export default function ProductScoringDashboard() {
                                         label={`Page ${currentPage} of ${paginationMeta.last_page}`}
                                     />
                                 </InlineStack>
-                                <InlineStack align="center">
-                                    <Text variant="bodySm" tone="subdued" as="p">
-                                        Showing {((currentPage - 1) * paginationMeta.per_page) + 1}–{Math.min(currentPage * paginationMeta.per_page, paginationMeta.total)} of {paginationMeta.total} products
-                                    </Text>
-                                </InlineStack>
                             </BlockStack>
                         )}
+
+                        <style>{`
+                            .ProductsTableWrap [class*="Polaris-IndexTable__ScrollBarContainer"] {
+                                display: none !important;
+                            }
+
+                            .ProductsTableWrap [class*="Polaris-IndexTable__ScrollLeft"],
+                            .ProductsTableWrap [class*="Polaris-IndexTable__ScrollRight"] {
+                                display: none !important;
+                            }
+                        `}</style>
 
                     </BlockStack>
                 </Page>

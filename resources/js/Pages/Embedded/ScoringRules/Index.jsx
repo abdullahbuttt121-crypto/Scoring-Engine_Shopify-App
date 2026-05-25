@@ -43,9 +43,11 @@ import {
     Box,
     Button,
     Card,
+    ChoiceList,
     Divider,
     EmptyState,
     FormLayout,
+    IndexFilters,
     IndexTable,
     InlineStack,
     Modal,
@@ -57,6 +59,7 @@ import {
     TextField,
     Tooltip,
     useIndexResourceState,
+    useSetIndexFiltersMode,
 } from '@shopify/polaris';
 import {
     EditIcon,
@@ -438,6 +441,10 @@ export default function ScoringRulesIndex() {
     const [typeFilter,    setTypeFilter]    = useState('all');
     const [statusFilter,  setStatusFilter]  = useState('all');
     const [sourceFilter,  setSourceFilter]  = useState('all');
+    const [sortSelected,  setSortSelected]  = useState(['order asc']);
+    const [sortBy,        setSortBy]        = useState('order');
+    const [sortDirection, setSortDirection] = useState('asc');
+    const { mode, setMode } = useSetIndexFiltersMode();
 
     // Pagination — client-side: all rules load at once, we slice for display
     const RULES_PER_PAGE = 10;
@@ -472,8 +479,21 @@ export default function ScoringRulesIndex() {
             next = next.filter(rule => Boolean(rule.is_global) === global);
         }
 
+        next = [...next].sort((a, b) => {
+            const dir = sortDirection === 'asc' ? 1 : -1;
+            if (sortBy === 'points') {
+                return ((a.points || 0) - (b.points || 0)) * dir;
+            }
+            if (sortBy === 'name') {
+                return (a.rule_name || '').localeCompare(b.rule_name || '') * dir;
+            }
+            const aOrder = a.sort_order == null ? Number.MAX_SAFE_INTEGER : Number(a.sort_order);
+            const bOrder = b.sort_order == null ? Number.MAX_SAFE_INTEGER : Number(b.sort_order);
+            return (aOrder - bOrder) * dir;
+        });
+
         return next;
-    }, [rules, searchValue, typeFilter, statusFilter, sourceFilter]);
+    }, [rules, searchValue, typeFilter, statusFilter, sourceFilter, sortBy, sortDirection]);
 
     const pagedRules = filteredRules.slice((rulesPage - 1) * RULES_PER_PAGE, rulesPage * RULES_PER_PAGE);
     const totalPages = Math.max(1, Math.ceil(filteredRules.length / RULES_PER_PAGE));
@@ -507,7 +527,95 @@ export default function ScoringRulesIndex() {
 
     useEffect(() => {
         setRulesPage(1);
-    }, [searchValue, typeFilter, statusFilter, sourceFilter]);
+    }, [searchValue, typeFilter, statusFilter, sourceFilter, sortBy, sortDirection]);
+
+    const handleSort = useCallback((selected) => {
+        setSortSelected(selected);
+        const [field, direction] = (selected[0] || 'order asc').split(' ');
+        setSortBy(field || 'order');
+        setSortDirection(direction || 'asc');
+    }, []);
+
+    const clearFilters = useCallback(() => {
+        setSearchValue('');
+        setTypeFilter('all');
+        setStatusFilter('all');
+        setSourceFilter('all');
+    }, []);
+
+    const sortOptions = [
+        { label: 'Order', value: 'order asc', directionLabel: 'Low to high' },
+        { label: 'Order', value: 'order desc', directionLabel: 'High to low' },
+        { label: 'Points', value: 'points desc', directionLabel: 'Highest first' },
+        { label: 'Points', value: 'points asc', directionLabel: 'Lowest first' },
+        { label: 'Rule name', value: 'name asc', directionLabel: 'A-Z' },
+        { label: 'Rule name', value: 'name desc', directionLabel: 'Z-A' },
+    ];
+
+    const filtersConfig = [
+        {
+            key: 'type',
+            label: 'Type',
+            shortcut: true,
+            filter: (
+                <ChoiceList
+                    title="Type"
+                    titleHidden
+                    choices={RULE_TYPES.map(type => ({ label: type.label, value: type.value }))}
+                    selected={typeFilter === 'all' ? [] : [typeFilter]}
+                    onChange={([value]) => setTypeFilter(value || 'all')}
+                />
+            ),
+        },
+        {
+            key: 'status',
+            label: 'Status',
+            shortcut: true,
+            filter: (
+                <ChoiceList
+                    title="Status"
+                    titleHidden
+                    choices={[
+                        { label: 'Active', value: 'active' },
+                        { label: 'Inactive', value: 'inactive' },
+                    ]}
+                    selected={statusFilter === 'all' ? [] : [statusFilter]}
+                    onChange={([value]) => setStatusFilter(value || 'all')}
+                />
+            ),
+        },
+        {
+            key: 'source',
+            label: 'Source',
+            shortcut: true,
+            filter: (
+                <ChoiceList
+                    title="Source"
+                    titleHidden
+                    choices={[
+                        { label: 'Global', value: 'global' },
+                        { label: 'Custom', value: 'custom' },
+                    ]}
+                    selected={sourceFilter === 'all' ? [] : [sourceFilter]}
+                    onChange={([value]) => setSourceFilter(value || 'all')}
+                />
+            ),
+        },
+    ];
+
+    const appliedFilters = useMemo(() => {
+        const items = [];
+        if (typeFilter !== 'all') {
+            items.push({ key: 'type', label: `Type: ${TYPE_LABEL[typeFilter] || typeFilter}`, onRemove: () => setTypeFilter('all') });
+        }
+        if (statusFilter !== 'all') {
+            items.push({ key: 'status', label: `Status: ${statusFilter}`, onRemove: () => setStatusFilter('all') });
+        }
+        if (sourceFilter !== 'all') {
+            items.push({ key: 'source', label: `Source: ${sourceFilter}`, onRemove: () => setSourceFilter('all') });
+        }
+        return items;
+    }, [typeFilter, statusFilter, sourceFilter]);
 
     // ── Create / Edit ─────────────────────────────────────────────────────
 
@@ -623,7 +731,9 @@ export default function ScoringRulesIndex() {
      * We pass `rules` directly — each rule already has `id`.
      */
     const { selectedResources, allResourcesSelected, handleSelectionChange } =
-        useIndexResourceState(filteredRules);
+        useIndexResourceState(filteredRules, {
+            resourceIDResolver: (rule) => String(rule.id),
+        });
 
     // Use only the current page's slice for the table rows
     const rowMarkup = pagedRules.map((rule, index) => (
@@ -722,7 +832,8 @@ export default function ScoringRulesIndex() {
     // ── Render ────────────────────────────────────────────────────────────
 
     return (
-        <Box paddingInline="800">
+        
+        <Box paddingInline="300">
             {/* Form modal (create + edit) */}
             <RuleFormModal
                 open={formOpen}
@@ -823,67 +934,35 @@ export default function ScoringRulesIndex() {
                     {/* Rules table */}
                     <Card padding="0">
                         <Box padding="400">
-                            <BlockStack gap="300">
+                            <BlockStack gap="00">
                                 <InlineStack align="space-between" blockAlign="center">
                                     <Text variant="headingSm" as="h2">Rule Library</Text>
-                                    <Button
-                                        variant="plain"
-                                        onClick={() => {
-                                            setSearchValue('');
-                                            setTypeFilter('all');
-                                            setStatusFilter('all');
-                                            setSourceFilter('all');
-                                        }}
-                                    >
-                                        Clear filters
-                                    </Button>
                                 </InlineStack>
-                                <div style={{
-                                    display: 'grid',
-                                    gridTemplateColumns: 'minmax(240px, 1fr) repeat(3, minmax(150px, 180px))',
-                                    gap: 12,
-                                }}>
-                                    <TextField
-                                        label="Search"
-                                        labelHidden
-                                        placeholder="Search rule name or condition"
-                                        value={searchValue}
-                                        onChange={setSearchValue}
-                                        autoComplete="off"
-                                    />
-                                    <Select
-                                        label="Type"
-                                        labelHidden
-                                        value={typeFilter}
-                                        onChange={setTypeFilter}
-                                        options={[
-                                            { label: 'All types', value: 'all' },
-                                            ...RULE_TYPES.map(type => ({ label: type.label, value: type.value })),
-                                        ]}
-                                    />
-                                    <Select
-                                        label="Status"
-                                        labelHidden
-                                        value={statusFilter}
-                                        onChange={setStatusFilter}
-                                        options={[
-                                            { label: 'All statuses', value: 'all' },
-                                            { label: 'Active', value: 'active' },
-                                            { label: 'Inactive', value: 'inactive' },
-                                        ]}
-                                    />
-                                    <Select
-                                        label="Source"
-                                        labelHidden
-                                        value={sourceFilter}
-                                        onChange={setSourceFilter}
-                                        options={[
-                                            { label: 'All sources', value: 'all' },
-                                            { label: 'Global', value: 'global' },
-                                            { label: 'Custom', value: 'custom' },
-                                        ]}
-                                    />
-                                </div>
+                                <IndexFilters
+                                    queryValue={searchValue}
+                                    queryPlaceholder="Search by rule name, type, condition..."
+                                    onQueryChange={setSearchValue}
+                                    onQueryClear={() => setSearchValue('')}
+                                    sortOptions={sortOptions}
+                                    sortSelected={sortSelected}
+                                    onSort={handleSort}
+                                    filters={filtersConfig}
+                                    appliedFilters={appliedFilters}
+                                    onClearAll={clearFilters}
+                                    mode={mode}
+                                    setMode={setMode}
+                                    tabs={[]}
+                                    cancelAction={{
+                                        onAction: clearFilters,
+                                        disabled:
+                                            !searchValue &&
+                                            typeFilter === 'all' &&
+                                            statusFilter === 'all' &&
+                                            sourceFilter === 'all',
+                                    }}
+                                    selected={0}
+                                    canCreateNewView={false}
+                                />
                             </BlockStack>
                         </Box>
                         <Divider />
@@ -905,12 +984,7 @@ export default function ScoringRulesIndex() {
                                     content: rules.length === 0 ? 'Create your first rule' : 'Clear filters',
                                     onAction: rules.length === 0
                                         ? openCreate
-                                        : () => {
-                                            setSearchValue('');
-                                            setTypeFilter('all');
-                                            setStatusFilter('all');
-                                            setSourceFilter('all');
-                                        },
+                                        : clearFilters,
                                 }}
                             >
                                 <p>
@@ -921,47 +995,71 @@ export default function ScoringRulesIndex() {
                             </EmptyState>
                         ) : (
                             <>
-                            <IndexTable
-                                resourceName={{ singular: 'rule', plural: 'rules' }}
-                                itemCount={filteredRules.length}
-                                selectedItemsCount={
-                                    allResourcesSelected ? 'All' : selectedResources.length
-                                }
-                                onSelectionChange={handleSelectionChange}
-                                headings={[
-                                    { title: 'Rule name' },
-                                    { title: 'Type' },
-                                    { title: 'Condition' },
-                                    { title: 'Points' },
-                                    { title: 'Order' },
-                                    { title: 'Status' },
-                                    { title: 'Actions' },
-                                ]}
-                            >
-                                {rowMarkup}
-                            </IndexTable>
+                            <div className="RulesTableWrap">
+                                <IndexTable
+                                    resourceName={{ singular: 'rule', plural: 'rules' }}
+                                    itemCount={filteredRules.length}
+                                    selectedItemsCount={
+                                        allResourcesSelected ? 'All' : selectedResources.length
+                                    }
+                                    onSelectionChange={handleSelectionChange}
+                                    headings={[
+                                        { title: 'Rule name' },
+                                        { title: 'Type' },
+                                        { title: 'Condition' },
+                                        { title: 'Points' },
+                                        { title: 'Order' },
+                                        { title: 'Status' },
+                                        { title: 'Actions' },
+                                    ]}
+                                >
+                                    {rowMarkup}
+                                </IndexTable>
+                            </div>
                             {/* Pagination controls */}
-                            <Box padding="400">
+                            <Box padding="0">
+                                <div style={{
+                                    borderTop: '1px solid #e1e3e5',
+                                    background: 'linear-gradient(180deg, #ffffff 0%, #f6f6f7 100%)',
+                                    padding: '14px 16px',
+                                }}>
                                 <BlockStack gap="200">
                                     <InlineStack align="center">
-                                        <Pagination
-                                            hasPrevious={rulesPage > 1}
-                                            onPrevious={() => setRulesPage(p => p - 1)}
-                                            hasNext={rulesPage < totalPages}
-                                            onNext={() => setRulesPage(p => p + 1)}
-                                            label={`Page ${rulesPage} of ${totalPages}`}
-                                        />
-                                    </InlineStack>
-                                    <InlineStack align="center">
-                                        <Text variant="bodySm" tone="subdued" as="p">
-                                            Showing {((rulesPage - 1) * RULES_PER_PAGE) + 1}–{Math.min(rulesPage * RULES_PER_PAGE, filteredRules.length)} of {filteredRules.length} rules
-                                        </Text>
+                                        <div style={{
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: 10,
+                                            border: '1px solid #d2d5d8',
+                                            borderRadius: 999,
+                                            background: '#fff',
+                                            padding: '6px 10px',
+                                        }}>
+                                            <Pagination
+                                                hasPrevious={rulesPage > 1}
+                                                onPrevious={() => setRulesPage(p => p - 1)}
+                                                hasNext={rulesPage < totalPages}
+                                                onNext={() => setRulesPage(p => p + 1)}
+                                                label={`Page ${rulesPage} of ${totalPages}`}
+                                            />
+                                        </div>
                                     </InlineStack>
                                 </BlockStack>
+                                </div>
                             </Box>
                             </>
                         )}
                     </Card>
+
+                    <style>{`
+                        .RulesTableWrap [class*="Polaris-IndexTable__ScrollBarContainer"] {
+                            display: none !important;
+                        }
+
+                        .RulesTableWrap [class*="Polaris-IndexTable__ScrollLeft"],
+                        .RulesTableWrap [class*="Polaris-IndexTable__ScrollRight"] {
+                            display: none !important;
+                        }
+                    `}</style>
 
                     {/* How scoring works info card */}
                     <Card>
