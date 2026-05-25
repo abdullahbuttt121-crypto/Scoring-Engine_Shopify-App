@@ -32,7 +32,20 @@ class ProductVarientRepository implements ProductVarientRepositoryInterface
     }
     public function updateOrCreate(array $data)
     {
-        $productVarient = $this->model->updateOrCreate($data);
+        /*
+         * BUG FIX: Eloquent's updateOrCreate() requires two arguments.
+         * Without splitting, ALL columns become match conditions — every call
+         * inserts a new variant row instead of updating the existing one.
+         *
+         * Match on (product_id + shopify_product_Varient_id) which uniquely
+         * identifies a variant for a product.
+         */
+        $matchKeys = [
+            'product_id'                 => $data['product_id'],
+            'shopify_product_Varient_id' => $data['shopify_product_Varient_id'],
+        ];
+
+        $productVarient = $this->model->updateOrCreate($matchKeys, $data);
         return $productVarient;
     }
     public function delete(int $id)

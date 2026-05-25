@@ -19,5 +19,8 @@ class DatabaseSeeder extends Seeder
             'name' => 'Test User',
             'email' => 'test@example.com',
         ]);
+
+        // Seed default global scoring rules (safe to run multiple times)
+        $this->call(ScoringRulesSeeder::class);
     }
 }

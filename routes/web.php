@@ -1,37 +1,55 @@
 <?php
 
-use Osiset\ShopifyApp\Util;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\DashboardController;
-use App\Http\Controllers\Auth\AuthenticatedSessionController;
-
-if (!config('shopify-app.appbridge_enabled')) {
-    Route::match(
-        ['GET', 'POST'],
-        '/authenticate',
-        AuthenticatedSessionController::class . '@authenticate'
-    )
-        ->name('authenticate');
-    Route::get(
-        '/authenticate/token',
-        AuthenticatedSessionController::class . '@authenticate'
-    )
-        ->middleware(['verify.shopify'])
-        ->name(Util::getShopifyConfig('route_names.authenticate.token'));
-}
+use App\Http\Controllers\ProductSyncController;
+use App\Http\Controllers\ProductScoreController;
+use App\Http\Controllers\ProductController;
+use App\Http\Controllers\DashboardStatsController;
+use App\Http\Controllers\ProductScoringDashboardController;
+use App\Http\Controllers\ScoringRuleController;
 
 Route::group(['middleware' => ['verify.embedded', 'verify.shopify']], function () {
 
-    Route::get('/', function () {
-        return null;
-    })->name('home');
+    // ── Root route → Product Scoring Inertia page ───────────────────────────
+    Route::get('/', [ProductScoringDashboardController::class, 'index'])->name('home');
 
-});
+    // ── Product Scoring Dashboard (Inertia page) ──────────────────────────
+    // GET /scoring  → loads the React Products/Index.jsx page
+    Route::get('/scoring', [ProductScoringDashboardController::class, 'index'])->name('scoring');
 
-Route::middleware(['auth'])->group(function () {
+    // ── Product sync ──────────────────────────────────────────────────────
+    // POST /products/sync  → queues SyncShopifyProductsJob
+    Route::post('/products/sync', [ProductSyncController::class, 'store'])->name('products.sync');
 
-    Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
-    Route::get('/search', [DashboardController::class, 'orderSeacrhfilter'])->name('search');
+    // ── Product data APIs (read-only) ─────────────────────────────────────
+    // GET /products          → paginated list with filters + sorting
+    // GET /products/{id}     → single product with score details + history
+    Route::get('/products',       [ProductController::class, 'index'])->name('products.index');
+    Route::get('/products/{id}',  [ProductController::class, 'show'])->name('products.show');
+
+    // ── Product scoring ───────────────────────────────────────────────────
+    // POST /products/{id}/recalculate-score  → queue scoring for one product
+    Route::post('/products/{id}/recalculate-score', [ProductScoreController::class, 'recalculate'])->name('products.recalculate-score');
+
+    // POST /scores/recalculate-all  → queue scoring for ALL shop products
+    Route::post('/scores/recalculate-all', [ProductScoreController::class, 'recalculateAll'])->name('scores.recalculate-all');
+
+    // ── Dashboard stats ───────────────────────────────────────────────────
+    // GET /dashboard/stats  → summary counts + timing for the stats bar
+    Route::get('/dashboard/stats', [DashboardStatsController::class, 'index'])->name('dashboard.stats');
+
+    // ── Scoring rules management (JSON API) ───────────────────────────────
+    // GET    /scoring-rules        → list all rules for this shop
+    // POST   /scoring-rules        → create a new rule
+    // PUT    /scoring-rules/{id}   → update (or clone-and-update if global)
+    // DELETE /scoring-rules/{id}   → delete own rule / disable global rule
+    Route::get('/scoring-rules',         [ScoringRuleController::class, 'index'])->name('scoring-rules.index');
+    Route::post('/scoring-rules',        [ScoringRuleController::class, 'store'])->name('scoring-rules.store');
+    Route::put('/scoring-rules/{id}',    [ScoringRuleController::class, 'update'])->name('scoring-rules.update');
+    Route::delete('/scoring-rules/{id}', [ScoringRuleController::class, 'destroy'])->name('scoring-rules.destroy');
+
+    // ── Scoring Rules Inertia page ────────────────────────────────────────
+    Route::get('/scoring-rules-page', [ProductScoringDashboardController::class, 'rulesPage'])->name('scoring-rules.page');
 
 });
 

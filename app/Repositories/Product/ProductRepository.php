@@ -45,7 +45,24 @@ class ProductRepository implements ProductRepositoryInterface
         $medias = $data['media'];
         unset($data['media']);
 
-        $product = $this->model->updateOrCreate($data);
+        /*
+         * BUG FIX: Eloquent's updateOrCreate() requires TWO arguments:
+         *   1st arg → match conditions (columns to search by)
+         *   2nd arg → values to set on match OR on create
+         *
+         * Without splitting them, ALL columns become match conditions, so every
+         * webhook call inserts a new row rather than updating the existing one —
+         * causing duplicate product rows.
+         *
+         * The correct match keys are the pair (user_id, shopify_product_id)
+         * which uniquely identify one product for one shop.
+         */
+        $matchKeys = [
+            'user_id'            => $data['user_id'],
+            'shopify_product_id' => $data['shopify_product_id'],
+        ];
+
+        $product = $this->model->updateOrCreate($matchKeys, $data);
 
         foreach ($varients as $varient) {
             $varient['product_id'] = $product->id;

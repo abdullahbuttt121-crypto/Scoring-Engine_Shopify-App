@@ -15,7 +15,8 @@
 @section('scripts')
     @parent
     <ui-nav-menu>
-        <a href="/" rel="home">Dashboard</a>
+        <a href="/scoring" rel="home">Product Scoring</a>
+        <a href="/scoring-rules-page">Scoring Rules</a>
     </ui-nav-menu>
 
     <script>

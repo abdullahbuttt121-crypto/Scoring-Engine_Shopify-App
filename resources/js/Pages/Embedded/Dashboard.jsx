@@ -3,7 +3,8 @@ import {
     IndexFilters,
     IndexTable,
     InlineStack,
-    Page, RangeSlider, Text, TextField, Popover, ActionList,
+    Page, Pagination, RangeSlider, Text, TextField, Popover, ActionList,
+    BlockStack,
     useBreakpoints, useIndexResourceState, useSetIndexFiltersMode
 } from '@shopify/polaris';
 import { useCallback, useEffect, useState } from 'react';
@@ -100,6 +101,11 @@ export default function Dashboard() {
     const [queryValue, setQueryValue] = useState('');
     
     const [syncOrders, setSyncOrders] = useState(false);
+
+    // ── Pagination (client-side) ──────────────────────────────────────────
+    // All orders load at once; we slice for display.
+    const ORDERS_PER_PAGE = 15;
+    const [currentPage, setCurrentPage] = useState(1);
 
 
     const { query } = usePage().props.ziggy;
@@ -436,6 +442,7 @@ export default function Dashboard() {
                 };
             })
         setLogs(newLogs);
+        setCurrentPage(1); // reset to first page whenever new data arrives
         setReload(false);
     };
 
@@ -481,45 +488,75 @@ export default function Dashboard() {
         setReload(false);
         setQueryValue(value);
     };
-    return (
-        <Box paddingInline={'800'}>
-            <Page
-                title='Dashboard'
-                fullWidth
-                backAction={() => { }}
-            >
-                <div style={{ display: "flex", gap: '10px', justifyContent: "end" }}>
 
+    // ── Pagination helpers ────────────────────────────────────────────────
+    const totalPages  = Math.max(1, Math.ceil(logs.length / ORDERS_PER_PAGE));
+    const pagedLogs   = logs.slice((currentPage - 1) * ORDERS_PER_PAGE, currentPage * ORDERS_PER_PAGE);
+
+    const pagedRowMarkup = pagedLogs.map(
+        ({ id, order_no, customer_name, order_name, quantity, status, fullfilment_status, total_price, country }, index) => (
+            <IndexTable.Row
+                id={id}
+                key={id}
+                selected={selectedResources.includes(id)}
+                position={index}
+            >
+                <IndexTable.Cell>
+                    <Text variant="bodyMd" fontWeight="bold" as="span">{id}</Text>
+                </IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{order_no}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{customer_name}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{order_name}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{quantity}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{status}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{fullfilment_status}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{total_price}</Box></IndexTable.Cell>
+                <IndexTable.Cell><Box paddingBlock="500">{country}</Box></IndexTable.Cell>
+                <IndexTable.Cell>
+                    <Box paddingBlock="500">
+                        <InlineStack gap="050">
+                            <Button variant="plain" size="large" tone="success" icon={EditIcon} />
+                            <Button variant="plain" size="large" tone="critical" icon={DeleteIcon} />
+                        </InlineStack>
+                    </Box>
+                </IndexTable.Cell>
+            </IndexTable.Row>
+        )
+    );
+
+    return (
+        <Box paddingInline="800">
+            <Page
+                title="Dashboard"
+                fullWidth
+                backAction={() => {}}
+            >
+                <div style={{ display: 'flex', gap: '10px', justifyContent: 'end', marginBottom: '12px' }}>
                     <FiancialFilterDropdown onFiancialStatusChange={setonFiancialStatusChange} />
                     <FulfilledFilterDropdown onFulfillStatusChange={setonFulfillStatusChange} />
                     <div>
-                        <Button onClick={onHandleCancel} disabled={!onFiancialStatusChange && !onFulfillStatusChange}>Cancel Filter</Button>
-
+                        <Button onClick={onHandleCancel} disabled={!onFiancialStatusChange && !onFulfillStatusChange}>
+                            Cancel Filter
+                        </Button>
                     </div>
                     <div>
-                        <Button onClick={handleSyncOrders}  disabled={syncOrders} >Sync Orders</Button>
+                        <Button onClick={handleSyncOrders} disabled={syncOrders}>
+                            Sync Orders
+                        </Button>
                     </div>
-               
                 </div>
 
-                <Card>
+                <Card padding="0">
                     <IndexFilters
                         sortOptions={sortOptions}
                         sortSelected={sortSelected}
                         queryValue={queryValue}
                         queryPlaceholder="Searching in all"
-
                         onQueryChange={SearchFilter}
-
                         onQueryClear={() => setQueryValue('')}
                         onSort={setSortSelected}
                         primaryAction={primaryAction}
-                        cancelAction={{
-                            onAction: onHandleCancel,
-                            disabled: false,
-                            loading: false,
-                        }}
-
+                        cancelAction={{ onAction: onHandleCancel, disabled: false, loading: false }}
                         tabs={tabs}
                         selected={selected}
                         onSelect={setSelected}
@@ -537,9 +574,7 @@ export default function Dashboard() {
                         resourceName={resourceName}
                         itemCount={logs.length}
                         selectable={false}
-                        selectedItemsCount={
-                            allResourcesSelected ? 'All' : selectedResources.length
-                        }
+                        selectedItemsCount={allResourcesSelected ? 'All' : selectedResources.length}
                         onSelectionChange={handleSelectionChange}
                         headings={[
                             { title: 'ID' },
@@ -547,21 +582,41 @@ export default function Dashboard() {
                             { title: 'customer_name' },
                             { title: 'order_name' },
                             { title: 'Quantity' },
-                            { title: 'Status  ' },
-                            { title: 'Fullfilment Status', },
+                            { title: 'Status' },
+                            { title: 'Fullfilment Status' },
                             { title: 'Total price' },
                             { title: 'Country' },
                             { title: 'Action' },
                         ]}
                     >
-                        {rowMarkup}
+                        {pagedRowMarkup}
                     </IndexTable>
 
-
+                    {/* Pagination bar */}
+                    {logs.length > 0 && (
+                        <Box padding="400">
+                            <BlockStack gap="200">
+                                <InlineStack align="center">
+                                    <Pagination
+                                        hasPrevious={currentPage > 1}
+                                        onPrevious={() => setCurrentPage(p => p - 1)}
+                                        hasNext={currentPage < totalPages}
+                                        onNext={() => setCurrentPage(p => p + 1)}
+                                        label={`Page ${currentPage} of ${totalPages}`}
+                                    />
+                                </InlineStack>
+                                <InlineStack align="center">
+                                    <Text variant="bodySm" tone="subdued" as="p">
+                                        Showing {((currentPage - 1) * ORDERS_PER_PAGE) + 1}–{Math.min(currentPage * ORDERS_PER_PAGE, logs.length)} of {logs.length} orders
+                                    </Text>
+                                </InlineStack>
+                            </BlockStack>
+                        </Box>
+                    )}
                 </Card>
             </Page>
         </Box>
-    )
+    );
 }
 
 function disambiguateLabel(key, value) {
