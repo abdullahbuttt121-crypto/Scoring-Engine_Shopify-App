@@ -404,6 +404,8 @@ export default function ProductScoringDashboard() {
     const [ruleDeleteOpen, setRuleDeleteOpen] = useState(false);
     const [deletingRule,   setDeletingRule]    = useState(null);
     const [ruleDeleting,   setRuleDeleting]    = useState(false);
+    const [hasActiveFilters ,   setHasActiveFilters]    = useState(false);
+    
 
     // ── IndexTable selection (Polaris built-in) ───────────────────────────
     const { selectedResources, allResourcesSelected, handleSelectionChange } =
