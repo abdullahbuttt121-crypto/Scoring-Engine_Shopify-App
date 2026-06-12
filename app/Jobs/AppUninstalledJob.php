@@ -65,6 +65,7 @@ class AppUninstalledJob extends \Osiset\ShopifyApp\Messaging\Jobs\AppUninstalled
             $product->delete();
         }
         $orders = $user->orders;
+        
         foreach ($orders as $order) {
             $orders->orderLineItems()->delete();
             $order->orderFulfillments()->delete();
