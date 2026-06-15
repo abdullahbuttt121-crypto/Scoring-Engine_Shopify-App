@@ -73,8 +73,10 @@ class AppUninstalledJob extends \Osiset\ShopifyApp\Messaging\Jobs\AppUninstalled
             $order->orderCustomer()->delete();
             $order->delete();
         }
+        
         $user->delete();
-        Log::info('App uninstalled for shop: ' . $this->shopDomain->toNative());
+
+        Log::info('App uninstalled for shop: ' . json_encode($this->shopDomain->toNative()));
         return true;
     }
 }

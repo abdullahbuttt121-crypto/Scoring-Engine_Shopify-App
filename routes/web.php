@@ -55,6 +55,12 @@ Route::group(['middleware' => ['verify.embedded', 'verify.shopify']], function (
     // ── Scoring Rules Inertia page ────────────────────────────────────────
     Route::get('/scoring-rules-page', [ProductScoringDashboardController::class, 'rulesPage'])->name('scoring-rules.page');
 
+    Route::get('/webhook' , function () {
+        $user = auth()->user();
+        $shop = $user->api->rest('GET', '/admin/api/2026-04/shop.json');
+        return response()->json(['message' => 'Webhook received' , 'shop' => $shop]);
+    })->name('webhook');
+
 });
 
 require __DIR__ . '/auth.php';
