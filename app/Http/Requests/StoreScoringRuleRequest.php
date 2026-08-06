@@ -84,7 +84,8 @@ class StoreScoringRuleRequest extends FormRequest
                 'max:255',
             ],
 
-            'points' => ['required', 'integer', 'between:-10000,10000'],
+            'points' => ['required', 'integer', 'between:0,10000'],
+            'score_effect' => ['sometimes', Rule::in([ScoringRule::EFFECT_ADD, ScoringRule::EFFECT_SUBTRACT])],
             'condition_tree' => ['nullable', 'array', function ($attribute, $value, $fail) {
                 if ($error = RuleConditionTree::validationError($value)) {
                     $fail($error);
@@ -103,7 +104,7 @@ class StoreScoringRuleRequest extends FormRequest
             'rule_type.in' => 'Rule type must be one of: status, price, inventory, recency, tags, vendor, image, description.',
             'condition_operator.in' => 'Condition operator must be one of: equals, not_equals, greater_than, less_than, empty, not_empty, contains, older_than_days.',
             'condition_value.required' => 'Condition value is required for this operator type.',
-            'points.between' => 'Points must be between -10,000 and 10,000.',
+            'points.between' => 'Points must be between 0 and 10,000.',
         ];
     }
 }

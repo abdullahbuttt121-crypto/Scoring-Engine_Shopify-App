@@ -174,10 +174,13 @@ class ProductScoringService
             // Check if the product value satisfies this rule's condition
             if ($evaluation['matched']) {
                 // Rule matched → add points and record the reason
-                $totalScore -= $rule->points;
-                $reasons[] = $this->buildRuleReason($rule, $evaluation['conditions']);
+                $healthImpact = $rule->effectiveScoreEffect() === ScoringRule::EFFECT_ADD
+                    ? $rule->pointMagnitude()
+                    : -$rule->pointMagnitude();
+                $totalScore += $healthImpact;
+                $reasons[] = $this->buildRuleReason($rule, $evaluation['conditions'], $healthImpact);
 
-                Log::debug("[ProductScoring] Rule '{$rule->rule_key}' matched. Health impact: -{$rule->points}. Total: {$totalScore}");
+                Log::debug("[ProductScoring] Rule '{$rule->rule_key}' matched. Health impact: {$healthImpact}. Total: {$totalScore}");
             }
         }
 
@@ -221,7 +224,7 @@ class ProductScoringService
         ];
     }
 
-    private function buildRuleReason(ScoringRule $rule, array $conditions): array
+    private function buildRuleReason(ScoringRule $rule, array $conditions, int $healthImpact): array
     {
         $conditionText = collect($conditions)->map(function (array $condition) {
             $value = in_array($condition['operator'], [ScoringRule::OP_EMPTY, ScoringRule::OP_NOT_EMPTY], true)
@@ -233,7 +236,8 @@ class ProductScoringService
         return [
             'rule_key' => $rule->rule_key,
             'label' => $rule->rule_name,
-            'health_impact' => -$rule->points,
+            'health_impact' => $healthImpact,
+            'score_effect' => $rule->effectiveScoreEffect(),
             'reason' => "{$rule->rule_name}: {$conditionText}",
             'conditions' => $conditions,
             'action_type' => $rule->action_type,

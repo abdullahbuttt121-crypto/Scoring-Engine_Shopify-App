@@ -256,7 +256,8 @@ function ReasonRow({ reason, index }) {
     const label   = stripPoints(reason);
     const isFirst = index === 0;
     const impact = Math.abs(pts || 0);
-    const dot     = impact >= 30 ? '#d72c0d'
+    const dot     = pts > 0 ? '#21a67a'
+                  : impact >= 30 ? '#d72c0d'
                   : impact >= 15 ? '#8b5a2b'
                   : '#8c9196';
     return (

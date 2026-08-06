@@ -19,6 +19,10 @@ use Illuminate\Database\Eloquent\Model;
  */
 class ScoringRule extends Model
 {
+    public const EFFECT_ADD = 'add';
+
+    public const EFFECT_SUBTRACT = 'subtract';
+
     // Rule type constants — use these instead of raw strings to avoid typos
     const TYPE_STATUS = 'status';
 
@@ -74,6 +78,7 @@ class ScoringRule extends Model
         'condition_value',
         'condition_tree',
         'points',
+        'score_effect',
         'action_type',
         'recommendation',
         'is_active',
@@ -95,6 +100,23 @@ class ScoringRule extends Model
             'operator' => $this->condition_operator,
             'value' => $this->condition_value,
         ];
+    }
+
+    public function effectiveScoreEffect(): string
+    {
+        // Negative values were the legacy way to express a bonus.
+        if ($this->points < 0) {
+            return self::EFFECT_ADD;
+        }
+
+        return in_array($this->score_effect, [self::EFFECT_ADD, self::EFFECT_SUBTRACT], true)
+            ? $this->score_effect
+            : self::EFFECT_SUBTRACT;
+    }
+
+    public function pointMagnitude(): int
+    {
+        return abs((int) $this->points);
     }
 
     public static function firstCondition(?array $tree): ?array

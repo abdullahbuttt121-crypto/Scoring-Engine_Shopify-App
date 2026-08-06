@@ -99,7 +99,7 @@ const OP_LABEL   = Object.fromEntries(OPERATORS.map(o => [o.value, o.label]));
 
 const BLANK_FORM = {
     rule_name: '', rule_type: 'inventory', condition_operator: 'less_than',
-    condition_value: '', points: '10', is_active: true, sort_order: '',
+    condition_value: '', points: '10', score_effect: 'subtract', is_active: true, sort_order: '',
 };
 
 function operatorsFor(ruleType) {
@@ -113,7 +113,7 @@ function ruleSummary(rule) {
     const typeLbl = TYPE_LABEL[rule.rule_type] || rule.rule_type;
     const opLbl   = OP_LABEL[rule.condition_operator] || rule.condition_operator;
     const val     = operatorNeedsValue(rule.condition_operator) && rule.condition_value != null ? ` ${rule.condition_value}` : '';
-    const pts     = rule.points >= 0 ? `+${rule.points}` : `${rule.points}`;
+    const pts     = `${rule.score_effect === 'add' ? '+' : '−'}${Math.abs(rule.points)}`;
     return `${typeLbl} ${opLbl}${val}  →  ${pts} pts`;
 }
 function validateRuleForm(form) {
@@ -125,7 +125,7 @@ function validateRuleForm(form) {
         errors.condition_value = 'A condition value is required for this operator.';
     const pts = parseInt(form.points, 10);
     if (isNaN(pts))                           errors.points = 'Points must be a number.';
-    else if (pts < -10000 || pts > 10000)     errors.points = 'Points must be between -10,000 and 10,000.';
+    else if (pts < 0 || pts > 10000)           errors.points = 'Points must be between 0 and 10,000.';
     if (!errors.rule_name && form.rule_name.length > 100)
         errors.rule_name = 'Rule name must be 100 characters or fewer.';
     return errors;
@@ -214,6 +214,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                     condition_operator: initialData.condition_operator || 'less_than',
                     condition_value:    initialData.condition_value ?? '',
                     points:             String(initialData.points ?? 10),
+                    score_effect:       initialData.score_effect || 'subtract',
                     is_active:          initialData.is_active !== false,
                     sort_order:         String(initialData.sort_order ?? ''),
                 });
@@ -249,6 +250,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
             condition_operator: form.condition_operator,
             condition_value:    operatorNeedsValue(form.condition_operator) ? form.condition_value.trim() : null,
             points:             parseInt(form.points, 10),
+            score_effect:       form.score_effect,
             is_active:          form.is_active,
             sort_order:         form.sort_order !== '' ? parseInt(form.sort_order, 10) : null,
         });
@@ -294,8 +296,15 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                     <TextField label="Points" type="number" value={form.points}
                         onChange={v => handleField('points', v)}
                         error={errors.points}
-                        helpText="Positive points reduce health when the issue matches. Negative points add a health bonus."
+                        helpText="The selected effect is applied once when this rule matches."
                         autoComplete="off" suffix="pts" />
+                    <Select label="Score effect"
+                        options={[
+                            { label: 'Subtract / cut points from health', value: 'subtract' },
+                            { label: 'Add points to health', value: 'add' },
+                        ]}
+                        value={form.score_effect}
+                        onChange={v => handleField('score_effect', v)} />
                     <Select label="Status"
                         options={[
                             { label: 'Active — applied when scoring', value: 'true' },

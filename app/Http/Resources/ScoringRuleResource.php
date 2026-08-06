@@ -36,7 +36,8 @@ class ScoringRuleResource extends JsonResource
             'condition_value' => $this->condition_value,
             'condition_tree' => $this->effectiveConditionTree(),
 
-            'points' => $this->points,
+            'points' => $this->pointMagnitude(),
+            'score_effect' => $this->effectiveScoreEffect(),
             'action_type' => $this->action_type,
             'recommendation' => $this->recommendation,
             'is_active' => (bool) $this->is_active,

@@ -284,7 +284,7 @@ Key behavior:
 Purpose:
 
 - Recursively evaluates nested ALL/ANY condition groups against a product.
-- Starts at 100 health points and deducts a rule's weight once when its full tree matches.
+- Starts at 100 health points and applies the rule's explicit Add or Subtract effect once when its full tree matches.
 - Stores explainable matched conditions, merchant action, and recommendation metadata.
 - Persists current score and appends score logs.
 - Updates denormalized score cache on `products`.

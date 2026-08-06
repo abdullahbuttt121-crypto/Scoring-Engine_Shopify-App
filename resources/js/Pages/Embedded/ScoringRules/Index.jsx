@@ -125,6 +125,7 @@ const BLANK_FORM = {
     condition_operator: 'less_than',
     condition_value:    '',
     points:             '10',
+    score_effect:       'subtract',
     is_active:          true,
     sort_order:         '',
     condition_tree: {
@@ -223,7 +224,7 @@ function validateForm(form) {
     if (!form.rule_name.trim())          errors.rule_name = 'Rule name is required.';
     const pts = parseInt(form.points, 10);
     if (isNaN(pts))                      errors.points = 'Points must be a number.';
-    else if (pts < -10000 || pts > 10000) errors.points = 'Points must be between -10,000 and 10,000.';
+    else if (pts < 0 || pts > 10000) errors.points = 'Points must be between 0 and 10,000.';
     if (!errors.rule_name && form.rule_name.length > 100)
         errors.rule_name = 'Rule name must be 100 characters or fewer.';
     const validateNode = (node) => {
@@ -271,6 +272,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                     condition_operator: initialData.condition_operator || 'less_than',
                     condition_value:    initialData.condition_value ?? '',
                     points:             String(initialData.points ?? 10),
+                    score_effect:       initialData.score_effect || 'subtract',
                     is_active:          initialData.is_active !== false,
                     sort_order:         String(initialData.sort_order ?? ''),
                     condition_tree:     existingTree.node_type === 'group'
@@ -325,6 +327,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
             condition_operator: form.condition_operator,
             condition_value:    operatorNeedsValue(form.condition_operator) ? form.condition_value.trim() : null,
             points:             parseInt(form.points, 10),
+            score_effect:       form.score_effect,
             is_active:          form.is_active,
             sort_order:         form.sort_order !== '' ? parseInt(form.sort_order, 10) : null,
             condition_tree:     form.condition_tree,
@@ -422,9 +425,22 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                         value={form.points}
                         onChange={v => handleField('points', v)}
                         error={errors.points}
-                        helpText="Positive points reduce health when this issue matches. Negative points act as a health bonus."
+                        helpText="Enter the number of points to apply once when the complete condition tree matches."
                         autoComplete="off"
                         suffix="pts"
+                    />
+
+                    <Select
+                        label="Score effect"
+                        options={[
+                            { label: 'Subtract / cut points from health', value: 'subtract' },
+                            { label: 'Add points to health', value: 'add' },
+                        ]}
+                        value={form.score_effect}
+                        onChange={v => handleField('score_effect', v)}
+                        helpText={form.score_effect === 'subtract'
+                            ? 'Example: health 100 minus 20 points becomes 80.'
+                            : 'Example: health 80 plus 20 points becomes 100.'}
                     />
 
                     <Select
@@ -899,10 +915,10 @@ export default function ScoringRulesIndex() {
                 <Text
                     variant="bodyMd"
                     fontWeight="semibold"
-                    tone={rule.points > 0 ? 'critical' : rule.points < 0 ? 'success' : undefined}
+                    tone={rule.score_effect === 'add' ? 'success' : 'critical'}
                     as="span"
                 >
-                    {rule.points >= 0 ? `+${rule.points}` : rule.points} pts
+                    {rule.score_effect === 'add' ? '+' : '−'}{rule.points} pts
                 </Text>
             </IndexTable.Cell>
 
@@ -1210,8 +1226,8 @@ export default function ScoringRulesIndex() {
                             <Divider />
                             <BlockStack gap="200">
                                 <Text as="p" tone="subdued">
-                                    Products start with 100 health points. The engine evaluates every active rule;
-                                    when its complete nested condition tree matches, its points are deducted once.
+                                    Products start with 100 health points. When a complete nested condition tree
+                                    matches, the selected Add or Subtract effect is applied exactly once.
                                 </Text>
                                 <Text as="p" tone="subdued">
                                     Score levels: {SCORE_LEVEL_OPTIONS.map(option => <span key={option.value}><Badge tone={option.value === 'low' ? 'critical' : option.value === 'medium' ? 'warning' : option.value === 'high' ? 'attention' : 'success'}>{option.label}</Badge>&nbsp;</span>)}
