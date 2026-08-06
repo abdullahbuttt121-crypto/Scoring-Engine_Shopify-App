@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\ScoringRule;
+use App\Support\RuleConditionTree;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -66,35 +67,43 @@ class StoreScoringRuleRequest extends FormRequest
         ];
 
         return [
-            'rule_name'          => ['required', 'string', 'max:100'],
-            'rule_type'          => ['required', Rule::in($validTypes)],
-            'condition_operator' => ['required', Rule::in($validOperators)],
+            'rule_name' => ['required', 'string', 'max:100'],
+            'rule_type' => ['required_without:condition_tree', Rule::in($validTypes)],
+            'condition_operator' => ['required_without:condition_tree', Rule::in($validOperators)],
 
             // condition_value is not needed for "empty" / "not_empty" / "older_than_days" (if no threshold)
             // For all other operators it IS required
-            'condition_value'    => [
+            'condition_value' => [
                 Rule::requiredIf(function () {
                     $op = $this->input('condition_operator');
-                    return !in_array($op, [ScoringRule::OP_EMPTY, ScoringRule::OP_NOT_EMPTY]);
+
+                    return ! $this->has('condition_tree') && ! in_array($op, [ScoringRule::OP_EMPTY, ScoringRule::OP_NOT_EMPTY]);
                 }),
                 'nullable',
                 'string',
                 'max:255',
             ],
 
-            'points'             => ['required', 'integer', 'between:-10000,10000'],
-            'is_active'          => ['sometimes', 'boolean'],
-            'sort_order'         => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'points' => ['required', 'integer', 'between:-10000,10000'],
+            'condition_tree' => ['nullable', 'array', function ($attribute, $value, $fail) {
+                if ($error = RuleConditionTree::validationError($value)) {
+                    $fail($error);
+                }
+            }],
+            'action_type' => ['nullable', Rule::in(array_keys(config('scoring.actions', [])))],
+            'recommendation' => ['nullable', 'string', 'max:1000'],
+            'is_active' => ['sometimes', 'boolean'],
+            'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
         ];
     }
 
     public function messages(): array
     {
         return [
-            'rule_type.in'          => 'Rule type must be one of: status, price, inventory, recency, tags, vendor, image, description.',
+            'rule_type.in' => 'Rule type must be one of: status, price, inventory, recency, tags, vendor, image, description.',
             'condition_operator.in' => 'Condition operator must be one of: equals, not_equals, greater_than, less_than, empty, not_empty, contains, older_than_days.',
             'condition_value.required' => 'Condition value is required for this operator type.',
-            'points.between'        => 'Points must be between -10,000 and 10,000.',
+            'points.between' => 'Points must be between -10,000 and 10,000.',
         ];
     }
 }

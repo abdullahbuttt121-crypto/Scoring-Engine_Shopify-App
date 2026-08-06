@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Http\Resources\ProductResource;
 use App\Models\Products\Product;
 use App\Models\User;
+use App\Support\ScoringConfig;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -30,9 +31,9 @@ class ProductController extends Controller
      *   search          string  Free-text search on title/handle/vendor/tags
      *   score_level     string  Filter by level: low | medium | high | critical
      *   status          string  Filter by Shopify status: active | draft | archived
-    *   vendor          string  Filter by vendor name
+     *   vendor          string  Filter by vendor name
      *   product_type    string  Filter by product type (exact)
-    *   inventory_issue string  out_of_stock | low_stock | no_issue
+     *   inventory_issue string  out_of_stock | low_stock | no_issue
      *   inventory_min   int     Minimum inventory quantity
      *   inventory_max   int     Maximum inventory quantity
      *   price_min       float   Minimum price
@@ -147,8 +148,7 @@ class ProductController extends Controller
      * This avoids a JOIN and is accurate because ProductScoringService always
      * keeps both columns in sync.
      *
-     * @param  \Illuminate\Database\Eloquent\Builder $query
-     * @param  Request                               $request
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
      */
     private function applyFilters($query, Request $request): void
     {
@@ -156,13 +156,13 @@ class ProductController extends Controller
         // Searches across title, handle, vendor, and tags.
         // Uses LIKE '%term%' which is case-insensitive in MySQL by default.
         if ($request->filled('search')) {
-            $term = '%' . $request->input('search') . '%';
+            $term = '%'.$request->input('search').'%';
             $query->where(function ($q) use ($term) {
-                $q->where('title',        'LIKE', $term)
-                  ->orWhere('handle',     'LIKE', $term)
-                  ->orWhere('vendor',     'LIKE', $term)
-                  ->orWhere('tags',       'LIKE', $term)
-                  ->orWhere('product_type', 'LIKE', $term);
+                $q->where('title', 'LIKE', $term)
+                    ->orWhere('handle', 'LIKE', $term)
+                    ->orWhere('vendor', 'LIKE', $term)
+                    ->orWhere('tags', 'LIKE', $term)
+                    ->orWhere('product_type', 'LIKE', $term);
             });
         }
 
@@ -170,20 +170,7 @@ class ProductController extends Controller
         // Convert level name → numeric score range, then filter products.score.
         if ($request->filled('score_level')) {
             $query->where(function ($q) use ($request) {
-                switch ($request->input('score_level')) {
-                    case 'critical':
-                        $q->where('score', '>', 100);
-                        break;
-                    case 'high':
-                        $q->whereBetween('score', [61, 100]);
-                        break;
-                    case 'medium':
-                        $q->whereBetween('score', [31, 60]);
-                        break;
-                    case 'low':
-                        $q->where('score', '<=', 30);
-                        break;
-                }
+                ScoringConfig::applyLevelRange($q, $request->input('score_level'));
             });
         }
 
@@ -193,7 +180,7 @@ class ProductController extends Controller
         }
 
         if ($request->filled('vendor')) {
-            $query->where('vendor', 'LIKE', '%' . $request->input('vendor') . '%');
+            $query->where('vendor', 'LIKE', '%'.$request->input('vendor').'%');
         }
 
         if ($request->filled('product_type')) {
@@ -242,28 +229,27 @@ class ProductController extends Controller
      * sort_by     → the column to sort on (mapped through $allowedSorts)
      * sort_direction → 'asc' or 'desc' (any other value defaults to 'desc')
      *
-     * @param  \Illuminate\Database\Eloquent\Builder $query
-     * @param  Request                               $request
+     * @param  \Illuminate\Database\Eloquent\Builder  $query
      */
     private function applySorting($query, Request $request): void
     {
         // Whitelist: maps friendly names (from React) → actual DB column names
         // This is the ONLY defence against SQL injection on this parameter.
         $allowedSorts = [
-            'score'       => 'score',
-            'title'       => 'title',
-            'price'       => 'price',
-            'inventory'   => 'inventory_quantity',
-            'updated_at'  => 'shopify_updated_at',
-            'created_at'  => 'shopify_created_at',
-            'synced_at'   => 'synced_at',
+            'score' => 'score',
+            'title' => 'title',
+            'price' => 'price',
+            'inventory' => 'inventory_quantity',
+            'updated_at' => 'shopify_updated_at',
+            'created_at' => 'shopify_created_at',
+            'synced_at' => 'synced_at',
         ];
 
         $sortBy = $request->input('sort_by', 'score');
         $sortBy = $allowedSorts[$sortBy] ?? 'score';  // fall back if not in whitelist
 
         // Only allow 'asc' or 'desc' — everything else becomes 'desc'
-        $sortDir = $request->input('sort_direction', 'desc');
+        $sortDir = $request->input('sort_direction', 'asc');
         $sortDir = in_array($sortDir, ['asc', 'desc']) ? $sortDir : 'desc';
 
         $query->orderBy($sortBy, $sortDir);

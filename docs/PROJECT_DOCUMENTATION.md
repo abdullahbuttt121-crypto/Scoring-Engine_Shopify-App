@@ -6,7 +6,7 @@ Swishtag Project is a Shopify embedded app built with Laravel + Inertia + React 
 
 - Sync Shopify products into a local database.
 - Score products using configurable scoring rules.
-- Show product risk/priority levels (Low, Medium, High, Critical).
+- Show product health levels and inverse attention priority (Low, Medium, High, Excellent).
 - Provide a merchant-facing dashboard for scoring operations.
 - Provide a dedicated Scoring Rules management page.
 
@@ -283,15 +283,16 @@ Key behavior:
 
 Purpose:
 
-- Evaluates active rules against a product.
-- Computes total score and reasons.
+- Recursively evaluates nested ALL/ANY condition groups against a product.
+- Starts at 100 health points and deducts a rule's weight once when its full tree matches.
+- Stores explainable matched conditions, merchant action, and recommendation metadata.
 - Persists current score and appends score logs.
 - Updates denormalized score cache on `products`.
 
 Score levels:
 
-- `critical`: >= 101
-- `high`: 61-100
+- `excellent`: >= 90
+- `high`: 61-89
 - `medium`: 31-60
 - `low`: 0-30
 

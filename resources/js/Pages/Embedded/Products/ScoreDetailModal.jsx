@@ -54,17 +54,11 @@ import { ImageIcon, RefreshIcon } from '@shopify/polaris-icons';
 import { useCallback, useEffect, useState } from 'react';
 import PriorityBadge from '@/Components/Scoring/PriorityBadge';
 import ScoreIndicator from '@/Components/Scoring/ScoreIndicator';
+import { reasonText, scoreLevelMeta } from '@/Config/scoring';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — mirrors ProductScore.php level thresholds
 // ─────────────────────────────────────────────────────────────────────────────
-
-const LEVEL_BAR_COLOR = {
-    critical: '#d72c0d',
-    high:     '#e08b00',
-    medium:   '#f3c94b',
-    low:      '#21a67a',
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RECOMMENDATION ENGINE
@@ -156,7 +150,11 @@ function generateRecommendations(reasons) {
     const seenMatches     = new Set();
 
     for (const reason of reasons) {
-        const lowerReason = reason.toLowerCase();
+        if (typeof reason === 'object' && reason.recommendation) {
+            recommendations.push({ text: reason.recommendation, tone: reason.action_type === 'promote' ? 'info' : 'warning' });
+            continue;
+        }
+        const lowerReason = reasonText(reason).toLowerCase();
 
         for (const rule of RECOMMENDATION_RULES) {
             if (seenMatches.has(rule.match)) continue; // already added this one
@@ -191,11 +189,13 @@ function formatDateShort(isoString) {
 
 // Extract the numeric points value from a reason string like "Low inventory [+40 pts]"
 function parsePoints(reason) {
+    if (typeof reason === 'object') return Number(reason.health_impact ?? 0);
     const m = reason.match(/\[([+-]?\d+)\s*pts\]/i);
     return m ? parseInt(m[1], 10) : null;
 }
 // Strip the trailing " [+40 pts]" bracket so we can show it separately
 function stripPoints(reason) {
+    if (typeof reason === 'object') return reasonText(reason);
     return reason.replace(/\s*\[[+-]?\d+\s*pts\]/i, '').trim();
 }
 
@@ -203,7 +203,7 @@ function stripPoints(reason) {
 // Score card — coloured panel that shows score + bar prominently
 // ─────────────────────────────────────────────────────────────────────────────
 function ScoreCard({ score, level, calculatedAt }) {
-    const color    = LEVEL_BAR_COLOR[level] || '#8c9196';
+    const color    = scoreLevelMeta(level).color;
     const bgAlpha  = `${color}18`;
     const borderCl = `${color}55`;
 
@@ -240,8 +240,8 @@ function ScoreCard({ score, level, calculatedAt }) {
                     }} />
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-                    <Text variant="bodySm" tone="subdued" as="span">0 — No issues</Text>
-                    <Text variant="bodySm" tone="subdued" as="span">101+ — Critical</Text>
+                    <Text variant="bodySm" tone="subdued" as="span">0 — Low health</Text>
+                    <Text variant="bodySm" tone="subdued" as="span">90+ — Excellent health</Text>
                 </div>
             </div>
         </div>
@@ -255,8 +255,9 @@ function ReasonRow({ reason, index }) {
     const pts     = parsePoints(reason);
     const label   = stripPoints(reason);
     const isFirst = index === 0;
-    const dot     = pts !== null && pts >= 30 ? '#d72c0d'
-                  : pts !== null && pts >= 15 ? '#e08b00'
+    const impact = Math.abs(pts || 0);
+    const dot     = impact >= 30 ? '#d72c0d'
+                  : impact >= 15 ? '#8b5a2b'
                   : '#8c9196';
     return (
         <div style={{
@@ -400,7 +401,7 @@ export default function ScoreDetailModal({ open, productId, query, onClose, onRe
         log.old_score !== null ? `${log.old_score} pts` : '–',
         `${log.new_score} pts`,
         log.score_changed ? (
-            <Badge tone={log.new_score > (log.old_score || 0) ? 'attention' : 'success'}>
+            <Badge tone={log.new_score > (log.old_score || 0) ? 'success' : 'critical'}>
                 {log.new_score > (log.old_score || 0) ? 'Increased' : 'Decreased'}
             </Badge>
         ) : <Badge tone="new">No change</Badge>,

@@ -30,6 +30,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import ScoreDetailModal from './ScoreDetailModal';
 import ProductTable from '@/Components/Products/ProductTable';
+import { SCORE_LEVELS, SCORE_LEVEL_OPTIONS } from '@/Config/scoring';
 
 function formatNumber(value) {
     return Number(value || 0).toLocaleString();
@@ -121,13 +122,8 @@ function DonutChart({
 
     let offset = 0;
 
-    const colorMap = {
-        Critical: '#d72c0d',
-        High: '#e08b00',
-        Medium: '#f3c94b',
-        Low: '#21a67a',
-        Unscored: '#8c9196',
-    };
+    const colorMap = Object.fromEntries(Object.values(SCORE_LEVELS).map(meta => [meta.label, meta.color]));
+    colorMap.Unscored = '#8c9196';
 
     return (
         <InlineStack gap="500" blockAlign="center" wrap={false}>
@@ -278,24 +274,24 @@ function BarChart({
 function PriorityBars({ stats }) {
     const items = [
         {
-            label: 'Critical',
-            value: stats?.critical_priority_products || 0,
-            color: '#d72c0d',
-        },
-        {
-            label: 'High',
-            value: stats?.high_priority_products || 0,
-            color: '#e08b00',
+            label: 'Low',
+            value: stats?.low_health_products || 0,
+            color: SCORE_LEVELS.low.color,
         },
         {
             label: 'Medium',
-            value: stats?.medium_priority_products || 0,
-            color: '#f3c94b',
+            value: stats?.medium_health_products || 0,
+            color: SCORE_LEVELS.medium.color,
         },
         {
-            label: 'Low',
-            value: stats?.low_priority_products || 0,
-            color: '#21a67a',
+            label: 'High',
+            value: stats?.high_health_products || 0,
+            color: SCORE_LEVELS.high.color,
+        },
+        {
+            label: 'Excellent',
+            value: stats?.excellent_health_products || 0,
+            color: SCORE_LEVELS.excellent.color,
         },
     ];
 
@@ -435,9 +431,9 @@ export default function ProductAnalyticsPage() {
     const [vendorFilter, setVendorFilter] = useState('');
     const [inventoryIssueFilter, setInventoryIssueFilter] = useState('');
 
-    const [sortSelected, setSortSelected] = useState(['score desc']);
+    const [sortSelected, setSortSelected] = useState(['score asc']);
     const [sortBy, setSortBy] = useState('score');
-    const [sortDirection, setSortDirection] = useState('desc');
+    const [sortDirection, setSortDirection] = useState('asc');
     const [currentPage, setCurrentPage] = useState(1);
 
     const [detailProductId, setDetailProductId] = useState(null);
@@ -536,7 +532,7 @@ export default function ProductAnalyticsPage() {
     const handleSort = useCallback((selected) => {
         setSortSelected(selected);
 
-        const [field, direction] = (selected[0] || 'score desc').split(' ');
+        const [field, direction] = (selected[0] || 'score asc').split(' ');
 
         setSortBy(field);
         setSortDirection(direction);
@@ -692,12 +688,7 @@ export default function ProductAnalyticsPage() {
                 <ChoiceList
                     title="Priority level"
                     titleHidden
-                    choices={[
-                        { label: 'Critical (101+)', value: 'critical' },
-                        { label: 'High (61-100)', value: 'high' },
-                        { label: 'Medium (31-60)', value: 'medium' },
-                        { label: 'Low (0-30)', value: 'low' },
-                    ]}
+                    choices={SCORE_LEVEL_OPTIONS}
                     selected={scoreLevel ? [scoreLevel] : []}
                     onChange={([value]) => setScoreLevel(value || '')}
                 />
@@ -795,20 +786,20 @@ export default function ProductAnalyticsPage() {
 
     const scoreDistribution = [
         {
-            label: 'Critical',
-            value: stats?.critical_priority_products || 0,
-        },
-        {
-            label: 'High',
-            value: stats?.high_priority_products || 0,
+            label: 'Low',
+            value: stats?.low_health_products || 0,
         },
         {
             label: 'Medium',
-            value: stats?.medium_priority_products || 0,
+            value: stats?.medium_health_products || 0,
         },
         {
-            label: 'Low',
-            value: stats?.low_priority_products || 0,
+            label: 'High',
+            value: stats?.high_health_products || 0,
+        },
+        {
+            label: 'Excellent',
+            value: stats?.excellent_health_products || 0,
         },
         {
             label: 'Unscored',
@@ -817,8 +808,8 @@ export default function ProductAnalyticsPage() {
     ];
 
     const productsNeedingAttention =
-        Number(stats?.critical_priority_products || 0) +
-        Number(stats?.high_priority_products || 0);
+        Number(stats?.low_health_products || 0) +
+        Number(stats?.medium_health_products || 0);
 
     return (
         <Box background="bg-surface-secondary" minHeight="100vh" paddingBlock="500">
@@ -924,7 +915,7 @@ export default function ProductAnalyticsPage() {
                                     <StatCard
                                         label="Need Attention"
                                         value={formatNumber(productsNeedingAttention)}
-                                        helper="Critical + High priority products"
+                                        helper="Low + Medium health products"
                                         tone="critical"
                                         badge="Priority"
                                     />
@@ -932,7 +923,7 @@ export default function ProductAnalyticsPage() {
                                     <StatCard
                                         label="Average Score"
                                         value={stats?.average_score != null ? `${stats.average_score} pts` : '-'}
-                                        helper="Average risk score"
+                                        helper="Average product health"
                                         tone="warning"
                                     />
 
@@ -1032,7 +1023,7 @@ export default function ProductAnalyticsPage() {
                                         </Text>
 
                                         <Text as="p" variant="bodySm" tone="subdued">
-                                            Top reasons products are receiving risk points.
+                                            Top rules reducing product health.
                                         </Text>
                                     </BlockStack>
 

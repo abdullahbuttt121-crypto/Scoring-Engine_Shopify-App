@@ -21,26 +21,29 @@ class ScoringRuleResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'                 => $this->id,
+            'id' => $this->id,
 
             // is_global = true means this is a shared default rule (shop_id = null)
             // The UI uses this to show a "Global" badge and different delete behaviour.
-            'is_global'          => $this->shop_id === null,
+            'is_global' => $this->shop_id === null,
 
-            'rule_name'          => $this->rule_name,
-            'rule_key'           => $this->rule_key,
-            'rule_type'          => $this->rule_type,
+            'rule_name' => $this->rule_name,
+            'rule_key' => $this->rule_key,
+            'rule_type' => $this->rule_type,
             'condition_operator' => $this->condition_operator,
 
             // condition_value may be null for "empty" / "not_empty" operators
-            'condition_value'    => $this->condition_value,
+            'condition_value' => $this->condition_value,
+            'condition_tree' => $this->effectiveConditionTree(),
 
-            'points'             => $this->points,
-            'is_active'          => (bool) $this->is_active,
-            'sort_order'         => $this->sort_order,
+            'points' => $this->points,
+            'action_type' => $this->action_type,
+            'recommendation' => $this->recommendation,
+            'is_active' => (bool) $this->is_active,
+            'sort_order' => $this->sort_order,
 
-            'created_at'         => $this->created_at?->toISOString(),
-            'updated_at'         => $this->updated_at?->toISOString(),
+            'created_at' => $this->created_at?->toISOString(),
+            'updated_at' => $this->updated_at?->toISOString(),
         ];
     }
 }

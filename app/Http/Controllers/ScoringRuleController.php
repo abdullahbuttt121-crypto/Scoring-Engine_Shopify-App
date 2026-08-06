@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
-use App\Http\Traits\ResponseTrait;
 use App\Http\Requests\StoreScoringRuleRequest;
 use App\Http\Requests\UpdateScoringRuleRequest;
 use App\Http\Resources\ScoringRuleResource;
+use App\Http\Traits\ResponseTrait;
 use App\Jobs\RecalculateAllProductScoresJob;
 use App\Models\ScoringRule;
 use Illuminate\Http\JsonResponse;
@@ -104,24 +104,32 @@ class ScoringRuleController extends Controller
             ->replaceMatches('/[^a-z0-9_]/', '')
             ->toString();
 
+        $tree = $request->input('condition_tree');
+        $primary = ScoringRule::firstCondition($tree);
+
         $rule = ScoringRule::create([
-            'shop_id'            => $user->id,   // always scoped to this shop
-            'rule_name'          => $request->input('rule_name'),
-            'rule_key'           => $ruleKey,
-            'rule_type'          => $request->input('rule_type'),
-            'condition_operator' => $request->input('condition_operator'),
-            'condition_value'    => $request->input('condition_value'),
-            'points'             => (int) $request->input('points'),
-            'is_active'          => (bool) $request->input('is_active', true),
-            'sort_order'         => (int) $sortOrder,
+            'shop_id' => $user->id,   // always scoped to this shop
+            'rule_name' => $request->input('rule_name'),
+            'rule_key' => $ruleKey,
+            'rule_type' => $primary['rule_type'] ?? $request->input('rule_type'),
+            'condition_operator' => $primary['operator'] ?? $request->input('condition_operator'),
+            'condition_value' => $primary['value'] ?? $request->input('condition_value'),
+            'condition_tree' => $tree,
+            'points' => (int) $request->input('points'),
+            'action_type' => $request->input('action_type'),
+            'recommendation' => $request->input('recommendation'),
+            'is_active' => (bool) $request->input('is_active', true),
+            'sort_order' => (int) $sortOrder,
         ]);
 
         Log::info("[ScoringRuleController] Rule created: '{$rule->rule_name}' for shop_id={$user->id}");
 
+        RecalculateAllProductScoresJob::dispatch($user->id);
+
         return response()->json([
             'success' => true,
-            'message' => 'Rule created. Recalculate all scores to apply it.',
-            'data'    => new ScoringRuleResource($rule),
+            'message' => 'Rule created. Product rescoring has been queued automatically.',
+            'data' => new ScoringRuleResource($rule),
         ], 201);
     }
 
@@ -159,42 +167,56 @@ class ScoringRuleController extends Controller
         if ($rule->shop_id === null) {
             Log::info("[ScoringRuleController] Cloning global rule #{$id} to shop_id={$user->id}");
 
+            $tree = $request->input('condition_tree', $rule->condition_tree);
+            $primary = ScoringRule::firstCondition($tree);
             $rule = ScoringRule::create([
-                'shop_id'            => $user->id,
-                'rule_name'          => $request->input('rule_name',          $rule->rule_name),
-                'rule_key'           => $rule->rule_key,   // keep original key for engine compatibility
-                'rule_type'          => $request->input('rule_type',          $rule->rule_type),
-                'condition_operator' => $request->input('condition_operator', $rule->condition_operator),
-                'condition_value'    => $request->input('condition_value',    $rule->condition_value),
-                'points'             => (int) $request->input('points',       $rule->points),
-                'is_active'          => (bool) $request->input('is_active',   $rule->is_active),
-                'sort_order'         => (int) $request->input('sort_order',   $rule->sort_order),
+                'shop_id' => $user->id,
+                'rule_name' => $request->input('rule_name', $rule->rule_name),
+                'rule_key' => $rule->rule_key,   // keep original key for engine compatibility
+                'rule_type' => $primary['rule_type'] ?? $request->input('rule_type', $rule->rule_type),
+                'condition_operator' => $primary['operator'] ?? $request->input('condition_operator', $rule->condition_operator),
+                'condition_value' => $primary['value'] ?? $request->input('condition_value', $rule->condition_value),
+                'condition_tree' => $tree,
+                'points' => (int) $request->input('points', $rule->points),
+                'action_type' => $request->input('action_type', $rule->action_type),
+                'recommendation' => $request->input('recommendation', $rule->recommendation),
+                'is_active' => (bool) $request->input('is_active', $rule->is_active),
+                'sort_order' => (int) $request->input('sort_order', $rule->sort_order),
             ]);
+
+            RecalculateAllProductScoresJob::dispatch($user->id);
 
             return response()->json([
                 'success' => true,
-                'message' => 'Global rule copied to your shop and updated. Recalculate scores to apply.',
-                'data'    => new ScoringRuleResource($rule),
+                'message' => 'Global rule copied and updated. Product rescoring has been queued.',
+                'data' => new ScoringRuleResource($rule),
             ]);
         }
 
         // Shop-owned rule — update in place
+        $tree = $request->input('condition_tree', $rule->condition_tree);
+        $primary = ScoringRule::firstCondition($tree);
         $rule->update([
-            'rule_name'          => $request->input('rule_name',          $rule->rule_name),
-            'rule_type'          => $request->input('rule_type',          $rule->rule_type),
-            'condition_operator' => $request->input('condition_operator', $rule->condition_operator),
-            'condition_value'    => $request->input('condition_value',    $rule->condition_value),
-            'points'             => (int) $request->input('points',       $rule->points),
-            'is_active'          => (bool) $request->input('is_active',   $rule->is_active),
-            'sort_order'         => (int) $request->input('sort_order',   $rule->sort_order),
+            'rule_name' => $request->input('rule_name', $rule->rule_name),
+            'rule_type' => $primary['rule_type'] ?? $request->input('rule_type', $rule->rule_type),
+            'condition_operator' => $primary['operator'] ?? $request->input('condition_operator', $rule->condition_operator),
+            'condition_value' => $primary['value'] ?? $request->input('condition_value', $rule->condition_value),
+            'condition_tree' => $tree,
+            'points' => (int) $request->input('points', $rule->points),
+            'action_type' => $request->input('action_type', $rule->action_type),
+            'recommendation' => $request->input('recommendation', $rule->recommendation),
+            'is_active' => (bool) $request->input('is_active', $rule->is_active),
+            'sort_order' => (int) $request->input('sort_order', $rule->sort_order),
         ]);
 
         Log::info("[ScoringRuleController] Rule #{$id} updated for shop_id={$user->id}");
 
+        RecalculateAllProductScoresJob::dispatch($user->id);
+
         return response()->json([
             'success' => true,
-            'message' => 'Rule updated. Recalculate scores to apply changes.',
-            'data'    => new ScoringRuleResource($rule->fresh()),
+            'message' => 'Rule updated. Product rescoring has been queued automatically.',
+            'data' => new ScoringRuleResource($rule->fresh()),
         ]);
     }
 
@@ -231,32 +253,38 @@ class ScoringRuleController extends Controller
         if ($rule->shop_id === null) {
             // Global rule — create a disabled shop copy so the engine skips it
             ScoringRule::create([
-                'shop_id'            => $user->id,
-                'rule_name'          => $rule->rule_name,
-                'rule_key'           => $rule->rule_key,
-                'rule_type'          => $rule->rule_type,
+                'shop_id' => $user->id,
+                'rule_name' => $rule->rule_name,
+                'rule_key' => $rule->rule_key,
+                'rule_type' => $rule->rule_type,
                 'condition_operator' => $rule->condition_operator,
-                'condition_value'    => $rule->condition_value,
-                'points'             => $rule->points,
-                'is_active'          => false,   // disabled = effectively deleted for this shop
-                'sort_order'         => $rule->sort_order,
+                'condition_value' => $rule->condition_value,
+                'condition_tree' => $rule->condition_tree,
+                'points' => $rule->points,
+                'action_type' => $rule->action_type,
+                'recommendation' => $rule->recommendation,
+                'is_active' => false,   // disabled = effectively deleted for this shop
+                'sort_order' => $rule->sort_order,
             ]);
 
             Log::info("[ScoringRuleController] Global rule #{$id} disabled for shop_id={$user->id} via shop copy.");
 
+            RecalculateAllProductScoresJob::dispatch($user->id);
+
             return response()->json([
                 'success' => true,
-                'message' => 'Global rule disabled for your shop. Recalculate scores to apply.',
+                'message' => 'Global rule disabled. Product rescoring has been queued.',
             ]);
         }
 
         // Shop-owned rule → hard delete
         $rule->delete();
+        RecalculateAllProductScoresJob::dispatch($user->id);
         Log::info("[ScoringRuleController] Shop rule #{$id} deleted for shop_id={$user->id}");
 
         return response()->json([
             'success' => true,
-            'message' => 'Rule deleted. Recalculate scores to apply.',
+            'message' => 'Rule deleted. Product rescoring has been queued.',
         ]);
     }
 }

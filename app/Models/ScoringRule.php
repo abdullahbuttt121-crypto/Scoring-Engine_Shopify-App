@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
-use App\Models\Products\ProductScore;
 
 /**
  * ScoringRule model
@@ -22,24 +20,50 @@ use App\Models\Products\ProductScore;
 class ScoringRule extends Model
 {
     // Rule type constants — use these instead of raw strings to avoid typos
-    const TYPE_STATUS      = 'status';
-    const TYPE_PRICE       = 'price';
-    const TYPE_INVENTORY   = 'inventory';
-    const TYPE_RECENCY     = 'recency';
-    const TYPE_TAGS        = 'tags';
-    const TYPE_VENDOR      = 'vendor';
-    const TYPE_IMAGE       = 'image';
+    const TYPE_STATUS = 'status';
+
+    const TYPE_PRICE = 'price';
+
+    const TYPE_INVENTORY = 'inventory';
+
+    const TYPE_RECENCY = 'recency';
+
+    const TYPE_TAGS = 'tags';
+
+    const TYPE_VENDOR = 'vendor';
+
+    const TYPE_IMAGE = 'image';
+
     const TYPE_DESCRIPTION = 'description';
 
     // Condition operator constants
-    const OP_EQUALS         = 'equals';
-    const OP_NOT_EQUALS     = 'not_equals';
-    const OP_GREATER_THAN   = 'greater_than';
-    const OP_LESS_THAN      = 'less_than';
-    const OP_NOT_EMPTY      = 'not_empty';
-    const OP_EMPTY          = 'empty';
-    const OP_CONTAINS       = 'contains';
+    const OP_EQUALS = 'equals';
+
+    const OP_NOT_EQUALS = 'not_equals';
+
+    const OP_GREATER_THAN = 'greater_than';
+
+    const OP_LESS_THAN = 'less_than';
+
+    const OP_NOT_EMPTY = 'not_empty';
+
+    const OP_EMPTY = 'empty';
+
+    const OP_CONTAINS = 'contains';
+
     const OP_OLDER_THAN_DAYS = 'older_than_days'; // days since last Shopify update
+
+    public static function validTypes(): array
+    {
+        return [self::TYPE_STATUS, self::TYPE_PRICE, self::TYPE_INVENTORY, self::TYPE_RECENCY,
+            self::TYPE_TAGS, self::TYPE_VENDOR, self::TYPE_IMAGE, self::TYPE_DESCRIPTION];
+    }
+
+    public static function validOperators(): array
+    {
+        return [self::OP_EQUALS, self::OP_NOT_EQUALS, self::OP_GREATER_THAN, self::OP_LESS_THAN,
+            self::OP_EMPTY, self::OP_NOT_EMPTY, self::OP_CONTAINS, self::OP_OLDER_THAN_DAYS];
+    }
 
     protected $fillable = [
         'shop_id',
@@ -48,16 +72,48 @@ class ScoringRule extends Model
         'rule_type',
         'condition_operator',
         'condition_value',
+        'condition_tree',
         'points',
+        'action_type',
+        'recommendation',
         'is_active',
         'sort_order',
     ];
 
     protected $casts = [
-        'is_active'  => 'boolean',
-        'points'     => 'integer',
+        'is_active' => 'boolean',
+        'points' => 'integer',
         'sort_order' => 'integer',
+        'condition_tree' => 'array',
     ];
+
+    public function effectiveConditionTree(): array
+    {
+        return $this->condition_tree ?: [
+            'node_type' => 'condition',
+            'rule_type' => $this->rule_type,
+            'operator' => $this->condition_operator,
+            'value' => $this->condition_value,
+        ];
+    }
+
+    public static function firstCondition(?array $tree): ?array
+    {
+        if (! $tree) {
+            return null;
+        }
+        if (($tree['node_type'] ?? null) === 'condition') {
+            return $tree;
+        }
+        foreach (($tree['children'] ?? []) as $child) {
+            $condition = self::firstCondition($child);
+            if ($condition) {
+                return $condition;
+            }
+        }
+
+        return null;
+    }
 
     // ── Relationships ────────────────────────────────────────────────────────
 
@@ -104,11 +160,11 @@ class ScoringRule extends Model
             ->pluck('rule_key')
             ->toArray();
 
-        return $query->where(function ($q) use ($shopId, $overriddenKeys) {
+        return $query->where(function ($q) use ($overriddenKeys) {
             // Global rules — but only those NOT overridden by a shop-specific copy.
             // This prevents double-counting when a merchant edits a global rule.
             $q->whereNull('shop_id')
-              ->whereNotIn('rule_key', $overriddenKeys);
+                ->whereNotIn('rule_key', $overriddenKeys);
         })->orWhere('shop_id', $shopId);
     }
 

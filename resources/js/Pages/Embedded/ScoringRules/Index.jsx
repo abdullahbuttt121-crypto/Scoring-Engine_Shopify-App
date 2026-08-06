@@ -24,8 +24,7 @@
  *
  * AFTER CHANGES:
  * ────────────────
- * Rule changes don't automatically rescore all products (expensive for large
- * catalogs). A "Recalculate All Scores" banner appears after any change.
+ * Rule changes automatically queue a safe background rescore for the shop.
  *
  * API CALLS:
  * ──────────
@@ -75,6 +74,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePage } from '@inertiajs/react';
 import DashboardStatCard from '@/Components/Scoring/DashboardStatCard';
 import InsightCard from '@/Components/Scoring/InsightCard';
+import { SCORE_LEVEL_OPTIONS } from '@/Config/scoring';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS — must stay in sync with ScoringRule PHP model constants
@@ -127,7 +127,70 @@ const BLANK_FORM = {
     points:             '10',
     is_active:          true,
     sort_order:         '',
+    condition_tree: {
+        node_type: 'group', combinator: 'all',
+        children: [{ node_type: 'condition', rule_type: 'inventory', operator: 'less_than', value: '' }],
+    },
+    action_type: 'attention',
+    recommendation: '',
 };
+
+const ACTION_OPTIONS = [
+    { label: 'Needs attention', value: 'attention' },
+    { label: 'Promote', value: 'promote' },
+    { label: 'Optimize', value: 'optimize' },
+    { label: 'Restock', value: 'restock' },
+    { label: 'Review', value: 'review' },
+];
+
+function newCondition() {
+    return { node_type: 'condition', rule_type: 'inventory', operator: 'less_than', value: '' };
+}
+
+function updateTreeNode(node, path, updater) {
+    if (path.length === 0) return updater(node);
+    const [index, ...rest] = path;
+    return { ...node, children: node.children.map((child, i) => i === index ? updateTreeNode(child, rest, updater) : child) };
+}
+
+function ConditionTreeEditor({ node, path = [], onChange, onRemove, depth = 0 }) {
+    if (node.node_type === 'condition') {
+        const available = operatorsFor(node.rule_type);
+        return (
+            <Box padding="300" background="bg-surface-secondary" borderRadius="200">
+                <BlockStack gap="200">
+                    <InlineStack gap="200" wrap={false} blockAlign="end">
+                        <div style={{ flex: 1 }}><Select label="Product field" options={RULE_TYPES} value={node.rule_type} onChange={(rule_type) => {
+                            const operator = operatorsFor(rule_type)[0]?.value || '';
+                            onChange(path, () => ({ ...node, rule_type, operator, value: '' }));
+                        }} /></div>
+                        <div style={{ flex: 1 }}><Select label="Condition" options={available} value={node.operator} onChange={(operator) => onChange(path, () => ({ ...node, operator, value: operatorNeedsValue(operator) ? node.value : null }))} /></div>
+                        {operatorNeedsValue(node.operator) && <div style={{ flex: 1 }}><TextField label="Value" value={String(node.value ?? '')} onChange={(value) => onChange(path, () => ({ ...node, value }))} autoComplete="off" /></div>}
+                        {onRemove && <Button tone="critical" onClick={onRemove}>Remove</Button>}
+                    </InlineStack>
+                </BlockStack>
+            </Box>
+        );
+    }
+
+    return (
+        <Box padding="300" borderColor="border" borderWidth="025" borderRadius="300">
+            <BlockStack gap="300">
+                <InlineStack align="space-between" blockAlign="center">
+                    <Select label={depth === 0 ? 'Match logic' : 'Nested group logic'} labelHidden={false} options={[{ label: 'ALL conditions (AND)', value: 'all' }, { label: 'ANY condition (OR)', value: 'any' }]} value={node.combinator} onChange={(combinator) => onChange(path, () => ({ ...node, combinator }))} />
+                    {onRemove && <Button tone="critical" onClick={onRemove}>Remove group</Button>}
+                </InlineStack>
+                {(node.children || []).map((child, index) => (
+                    <ConditionTreeEditor key={`${path.join('-')}-${index}`} node={child} path={[...path, index]} depth={depth + 1} onChange={onChange} onRemove={() => onChange(path, (group) => ({ ...group, children: group.children.filter((_, i) => i !== index) }))} />
+                ))}
+                <InlineStack gap="200">
+                    <Button onClick={() => onChange(path, (group) => ({ ...group, children: [...group.children, newCondition()] }))}>Add condition</Button>
+                    {depth < 4 && <Button onClick={() => onChange(path, (group) => ({ ...group, children: [...group.children, { node_type: 'group', combinator: 'all', children: [newCondition()] }] }))}>Add nested group</Button>}
+                </InlineStack>
+            </BlockStack>
+        </Box>
+    );
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -144,20 +207,33 @@ function operatorNeedsValue(operatorValue) {
     return op ? op.needsValue : true;
 }
 
+function conditionTreeSummary(node) {
+    if (!node) return '';
+    if (node.node_type === 'condition') {
+        const value = operatorNeedsValue(node.operator) ? ` "${node.value}"` : '';
+        return `${TYPE_LABEL[node.rule_type] || node.rule_type} ${OP_LABEL[node.operator] || node.operator}${value}`;
+    }
+    const joiner = node.combinator === 'any' ? ' OR ' : ' AND ';
+    return `(${(node.children || []).map(conditionTreeSummary).join(joiner)})`;
+}
+
 /** Validates the form before submission. Returns error object (empty = valid). */
 function validateForm(form) {
     const errors = {};
     if (!form.rule_name.trim())          errors.rule_name = 'Rule name is required.';
-    if (!form.rule_type)                 errors.rule_type = 'Rule type is required.';
-    if (!form.condition_operator)        errors.condition_operator = 'Operator is required.';
-    if (operatorNeedsValue(form.condition_operator) && !form.condition_value.trim()) {
-        errors.condition_value = 'A condition value is required for this operator.';
-    }
     const pts = parseInt(form.points, 10);
     if (isNaN(pts))                      errors.points = 'Points must be a number.';
     else if (pts < -10000 || pts > 10000) errors.points = 'Points must be between -10,000 and 10,000.';
     if (!errors.rule_name && form.rule_name.length > 100)
         errors.rule_name = 'Rule name must be 100 characters or fewer.';
+    const validateNode = (node) => {
+        if (node.node_type === 'group') {
+            if (!node.children?.length) return false;
+            return node.children.every(validateNode);
+        }
+        return Boolean(node.rule_type && node.operator && (!operatorNeedsValue(node.operator) || String(node.value ?? '').trim()));
+    };
+    if (!validateNode(form.condition_tree)) errors.condition_tree = 'Every group needs a valid condition and every required value must be filled in.';
     return errors;
 }
 
@@ -188,6 +264,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
     useEffect(() => {
         if (open) {
             if (initialData) {
+                const existingTree = initialData.condition_tree || newCondition();
                 setForm({
                     rule_name:          initialData.rule_name || '',
                     rule_type:          initialData.rule_type || 'inventory',
@@ -196,9 +273,14 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                     points:             String(initialData.points ?? 10),
                     is_active:          initialData.is_active !== false,
                     sort_order:         String(initialData.sort_order ?? ''),
+                    condition_tree:     existingTree.node_type === 'group'
+                        ? existingTree
+                        : { node_type: 'group', combinator: 'all', children: [existingTree] },
+                    action_type:        initialData.action_type || 'attention',
+                    recommendation:     initialData.recommendation || '',
                 });
             } else {
-                setForm(BLANK_FORM);
+                setForm(structuredClone(BLANK_FORM));
             }
             setErrors({});
         }
@@ -245,8 +327,16 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
             points:             parseInt(form.points, 10),
             is_active:          form.is_active,
             sort_order:         form.sort_order !== '' ? parseInt(form.sort_order, 10) : null,
+            condition_tree:     form.condition_tree,
+            action_type:        form.action_type || null,
+            recommendation:     form.recommendation.trim() || null,
         });
     };
+
+    const handleTreeChange = useCallback((path, updater) => {
+        setForm(current => ({ ...current, condition_tree: updateTreeNode(current.condition_tree, path, updater) }));
+        setErrors(current => ({ ...current, condition_tree: undefined }));
+    }, []);
 
     // Operators available for the current rule_type
     const availableOps = useMemo(() => operatorsFor(form.rule_type), [form.rule_type]);
@@ -276,6 +366,15 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                         helpText="A short label shown in the rules list, e.g. 'Low Stock Warning'."
                         autoComplete="off"
                     />
+
+                    <BlockStack gap="200">
+                        <Text variant="headingSm" as="h3">Conditions</Text>
+                        <Text variant="bodySm" tone="subdued" as="p">Build nested ALL/AND or ANY/OR groups. Points apply once only when the complete tree matches.</Text>
+                        <ConditionTreeEditor node={form.condition_tree} onChange={handleTreeChange} />
+                        {errors.condition_tree && <Text tone="critical" as="p">{errors.condition_tree}</Text>}
+                    </BlockStack>
+
+                    <div style={{ display: 'none' }}>
 
                     {/* Rule type */}
                     <Select
@@ -314,6 +413,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                             autoComplete="off"
                         />
                     )}
+                    </div>
 
                     {/* Points */}
                     <TextField
@@ -322,9 +422,27 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                         value={form.points}
                         onChange={v => handleField('points', v)}
                         error={errors.points}
-                        helpText="Positive = adds to risk score. Negative = reduces score. Range: -10,000 to 10,000."
+                        helpText="Positive points reduce health when this issue matches. Negative points act as a health bonus."
                         autoComplete="off"
                         suffix="pts"
+                    />
+
+                    <Select
+                        label="Merchant action"
+                        options={ACTION_OPTIONS}
+                        value={form.action_type}
+                        onChange={v => handleField('action_type', v)}
+                        helpText="The business action suggested when this rule matches."
+                    />
+
+                    <TextField
+                        label="Recommendation (optional)"
+                        value={form.recommendation}
+                        onChange={v => handleField('recommendation', v)}
+                        multiline={3}
+                        maxLength={1000}
+                        showCharacterCount
+                        autoComplete="off"
                     />
 
                     {/* Active toggle */}
@@ -392,7 +510,7 @@ function DeleteConfirmModal({ open, rule, onClose, onConfirm, deleting }) {
                             for other shops, but this rule will be skipped for your store.
                         </Text>
                         <Text as="p" tone="subdued">
-                            After disabling, click "Recalculate All Scores" to update your product scores.
+                            Product rescoring will be queued automatically after disabling.
                         </Text>
                     </BlockStack>
                 ) : (
@@ -401,8 +519,7 @@ function DeleteConfirmModal({ open, rule, onClose, onConfirm, deleting }) {
                             Are you sure you want to delete <strong>{rule.rule_name}</strong>?
                         </Text>
                         <Text as="p" tone="subdued">
-                            This cannot be undone. Click "Recalculate All Scores" afterwards to
-                            update your product scores.
+                            This cannot be undone. Product rescoring will be queued automatically.
                         </Text>
                     </BlockStack>
                 )}
@@ -662,7 +779,7 @@ export default function ScoringRulesIndex() {
 
             setFormOpen(false);
             setFeedback({ type: 'success', text: result.message });
-            setRulesChanged(true);
+            setRulesChanged(false);
             await fetchRules();
         } catch (err) {
             setFeedback({ type: 'critical', text: 'Save failed. Please try again.' });
@@ -686,7 +803,7 @@ export default function ScoringRulesIndex() {
             const result = await res.json();
             if (!res.ok) throw new Error(result.message || 'Toggle failed.');
             setFeedback({ type: 'success', text: result.message });
-            setRulesChanged(true);
+            setRulesChanged(false);
             await fetchRules();
         } catch (err) {
             setFeedback({ type: 'critical', text: err.message });
@@ -710,7 +827,7 @@ export default function ScoringRulesIndex() {
             setDeleteOpen(false);
             setDeletingRule(null);
             setFeedback({ type: 'success', text: result.message });
-            setRulesChanged(true);
+            setRulesChanged(false);
             await fetchRules();
         } catch (err) {
             setFeedback({ type: 'critical', text: err.message });
@@ -773,10 +890,7 @@ export default function ScoringRulesIndex() {
             {/* Condition summary */}
             <IndexTable.Cell>
                 <Text variant="bodySm" tone="subdued" as="span">
-                    {OP_LABEL[rule.condition_operator] || rule.condition_operator}
-                    {operatorNeedsValue(rule.condition_operator) && rule.condition_value != null
-                        ? ` "${rule.condition_value}"`
-                        : ''}
+                    {conditionTreeSummary(rule.condition_tree)}
                 </Text>
             </IndexTable.Cell>
 
@@ -865,7 +979,7 @@ export default function ScoringRulesIndex() {
 
             <Page
                 title="Scoring Rules"
-                subtitle="Define which product conditions add points to the risk score. Higher score = more merchant attention needed."
+                subtitle="Define business conditions that reduce product health and surface the products needing attention first."
                 primaryAction={{
                     content: 'Create rule',
                     icon:    PlusIcon,
@@ -918,9 +1032,9 @@ export default function ScoringRulesIndex() {
                         />
                         <InsightCard
                             title="Rule Changes"
-                            body={rulesChanged ? 'Unapplied changes detected. Recalculate all scores.' : 'No pending changes detected.'}
+                            body={rulesChanged ? 'A manual rescore is available.' : 'Rule changes automatically queue product rescoring.'}
                             tone={rulesChanged ? 'warning' : 'success'}
-                            footer="Use Recalculate all scores after create/update/delete actions."
+                            footer="Use the manual rescore only when you want to refresh immediately."
                         />
                     </div>
 
@@ -1017,7 +1131,7 @@ export default function ScoringRulesIndex() {
                             >
                                 <p>
                                     {rules.length === 0
-                                        ? 'Scoring rules define which product conditions add points to the risk score. Create a rule to get started.'
+                                        ? 'Scoring rules define which conditions reduce product health and which merchant action to take. Create a rule to get started.'
                                         : 'Try changing your filters to see more rules.'}
                                 </p>
                             </EmptyState>
@@ -1096,15 +1210,11 @@ export default function ScoringRulesIndex() {
                             <Divider />
                             <BlockStack gap="200">
                                 <Text as="p" tone="subdued">
-                                    When a product is scored, the engine evaluates every <strong>active</strong> rule
-                                    against the product's data. For each rule that matches, the rule's points are
-                                    added to the total score.
+                                    Products start with 100 health points. The engine evaluates every active rule;
+                                    when its complete nested condition tree matches, its points are deducted once.
                                 </Text>
                                 <Text as="p" tone="subdued">
-                                    Score levels: <Badge tone="success">Low (0–30)</Badge>&nbsp;
-                                    <Badge tone="warning">Medium (31–60)</Badge>&nbsp;
-                                    <Badge tone="attention">High (61–100)</Badge>&nbsp;
-                                    <Badge tone="critical">Critical (101+)</Badge>
+                                    Score levels: {SCORE_LEVEL_OPTIONS.map(option => <span key={option.value}><Badge tone={option.value === 'low' ? 'critical' : option.value === 'medium' ? 'warning' : option.value === 'high' ? 'attention' : 'success'}>{option.label}</Badge>&nbsp;</span>)}
                                 </Text>
                                 <Text as="p" tone="subdued">
                                     <strong>Global rules</strong> are shared defaults visible to all shops.
@@ -1112,8 +1222,7 @@ export default function ScoringRulesIndex() {
                                     original is never modified.
                                 </Text>
                                 <Text as="p" tone="subdued">
-                                    After adding or changing rules, use <strong>"Recalculate all scores"</strong> on
-                                    the Product Scoring page (or the banner above) to apply the changes.
+                                    After adding or changing rules, product rescoring is queued automatically.
                                 </Text>
                             </BlockStack>
                         </BlockStack>

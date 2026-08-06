@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Http\Traits\ResponseTrait;
+use App\Support\ScoringConfig;
 
 /**
  * ProductScoringDashboardController
@@ -26,7 +27,7 @@ class ProductScoringDashboardController extends Controller
 
     public function index()
     {
-        return $this->render('Products/Index');
+        return $this->render('Products/Index', ['scoringConfig' => ScoringConfig::frontend()]);
     }
 
     /**
@@ -36,7 +37,7 @@ class ProductScoringDashboardController extends Controller
      */
     public function rulesPage()
     {
-        return $this->render('ScoringRules/Index');
+        return $this->render('ScoringRules/Index', ['scoringConfig' => ScoringConfig::frontend()]);
     }
 
     /**
@@ -46,6 +47,6 @@ class ProductScoringDashboardController extends Controller
      */
     public function analyticsPage()
     {
-        return $this->render('Products/Analytics');
+        return $this->render('Products/Analytics', ['scoringConfig' => ScoringConfig::frontend()]);
     }
 }

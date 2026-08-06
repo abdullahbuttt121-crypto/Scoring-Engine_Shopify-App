@@ -62,6 +62,7 @@ import InsightCard from '@/Components/Scoring/InsightCard';
 import PriorityBadge from '@/Components/Scoring/PriorityBadge';
 import ScoreIndicator from '@/Components/Scoring/ScoreIndicator';
 import ProductTable from '@/Components/Products/ProductTable';
+import { SCORE_LEVEL_OPTIONS, levelFromScore, reasonText } from '@/Config/scoring';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSTANTS
@@ -133,14 +134,6 @@ function validateRuleForm(form) {
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: derive level from numeric score (mirrors PHP ProductScore::levelFromScore)
 // ─────────────────────────────────────────────────────────────────────────────
-function levelFromScore(score) {
-    if (score === null || score === undefined) return null;
-    if (score > 100) return 'critical';
-    if (score >= 61)  return 'high';
-    if (score >= 31)  return 'medium';
-    return 'low';
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPER: format ISO date string into a readable short form
 // ─────────────────────────────────────────────────────────────────────────────
@@ -301,7 +294,7 @@ function RuleFormModal({ open, initialData, onClose, onSave, saving }) {
                     <TextField label="Points" type="number" value={form.points}
                         onChange={v => handleField('points', v)}
                         error={errors.points}
-                        helpText="Positive = increases risk score. Negative = reduces it."
+                        helpText="Positive points reduce health when the issue matches. Negative points add a health bonus."
                         autoComplete="off" suffix="pts" />
                     <Select label="Status"
                         options={[
@@ -387,9 +380,9 @@ export default function ProductScoringDashboard() {
     const [scoreLevel,    setScoreLevel]    = useState('');
     const [statusFilter,  setStatusFilter]  = useState('');
     // IndexFilters sort — a single "field dir" string in an array, e.g. ['score desc']
-    const [sortSelected,  setSortSelected]  = useState(['score desc']);
+    const [sortSelected,  setSortSelected]  = useState(['score asc']);
     const [sortBy,        setSortBy]        = useState('score');
-    const [sortDirection, setSortDirection] = useState('desc');
+    const [sortDirection, setSortDirection] = useState('asc');
     const [currentPage,   setCurrentPage]   = useState(1);
     const [filterVersion, setFilterVersion] = useState(0);
     const { mode, setMode } = useSetIndexFiltersMode();
@@ -446,7 +439,7 @@ export default function ProductScoringDashboard() {
                 page: 1,
                 per_page: 5,
                 sort_by: 'score',
-                sort_direction: 'desc',
+                sort_direction: 'asc',
             };
 
             const response = await fetch(route('products.index', params));
@@ -622,7 +615,7 @@ export default function ProductScoringDashboard() {
         const reasonMap = new Map();
 
         products.forEach((product) => {
-            const reason = (product.score_breakdown || product.score_info?.reasons || [])[0];
+            const reason = reasonText((product.score_breakdown || product.score_info?.reasons || [])[0]);
             if (!reason) return;
             const key = reason.length > 80 ? `${reason.substring(0, 80)}...` : reason;
             reasonMap.set(key, (reasonMap.get(key) || 0) + 1);
@@ -633,8 +626,8 @@ export default function ProductScoringDashboard() {
     }, [products]);
 
     const attentionCount =
-        (stats?.critical_priority_products || 0) +
-        (stats?.high_priority_products || 0);
+        (stats?.low_health_products || 0) +
+        (stats?.medium_health_products || 0);
 
     // ─────────────────────────────────────────────────────────────────────
     // INDEXFILTERS — sort options, filters, applied filters
@@ -660,12 +653,7 @@ export default function ProductScoringDashboard() {
                 <ChoiceList
                     title="Score level"
                     titleHidden
-                    choices={[
-                        { label: 'Critical (101+)',  value: 'critical' },
-                        { label: 'High (61–100)',    value: 'high'     },
-                        { label: 'Medium (31–60)',   value: 'medium'   },
-                        { label: 'Low (0–30)',       value: 'low'      },
-                    ]}
+                    choices={SCORE_LEVEL_OPTIONS}
                     selected={scoreLevel ? [scoreLevel] : []}
                     onChange={([val]) => setScoreLevel(val || '')}
                 />
@@ -722,7 +710,7 @@ export default function ProductScoringDashboard() {
         const score      = product.score;
         const level      = product.score_info?.level || (score !== null ? levelFromScore(score) : null);
         // Show the first reason from the score breakdown as a preview in the table
-        const topReason  = (product.score_breakdown || product.score_info?.reasons || [])[0] || null;
+        const topReason  = reasonText((product.score_breakdown || product.score_info?.reasons || [])[0]);
 
         return (
             <IndexTable.Row
@@ -931,10 +919,10 @@ export default function ProductScoringDashboard() {
                                         gap: 12,
                                     }}>
                                         <DashboardStatCard label="Total Products" value={stats?.total_products} helper="Products currently synced" />
-                                        <DashboardStatCard label="Critical Priority" value={stats?.critical_priority_products} helper="Immediate action required" tone="critical" emphasisLabel="Urgent" />
-                                        <DashboardStatCard label="High Priority" value={stats?.high_priority_products} helper="Requires attention soon" tone="warning" emphasisLabel="High" />
-                                        <DashboardStatCard label="Medium Priority" value={stats?.medium_priority_products} helper="Monitor and optimise" tone="caution" />
-                                        <DashboardStatCard label="Low Priority" value={stats?.low_priority_products} helper="Healthy products" tone="success" />
+                                        <DashboardStatCard label="Low Health" value={stats?.low_health_products} helper="Immediate attention required" tone="critical" emphasisLabel="Priority" />
+                                        <DashboardStatCard label="Medium Health" value={stats?.medium_health_products} helper="Optimize soon" tone="warning" />
+                                        <DashboardStatCard label="High Health" value={stats?.high_health_products} helper="Performing well" tone="caution" />
+                                        <DashboardStatCard label="Excellent Health" value={stats?.excellent_health_products} helper="Strong products" tone="success" />
                                         <DashboardStatCard label="Average Score" value={stats?.average_score != null ? `${stats.average_score} pts` : '–'} helper="Across scored products" />
                                         <DashboardStatCard label="Last Product Sync" value={formatDate(stats?.last_sync_time)} helper="Last successful product sync" />
                                         <DashboardStatCard label="Last Score Calculation" value={formatDate(stats?.last_score_calculation_time)} helper="Last scoring run time" />
@@ -950,13 +938,13 @@ export default function ProductScoringDashboard() {
                         }}>
                             <InsightCard
                                 title="Products Needing Attention"
-                                body={`${attentionCount} products are currently High or Critical priority.`}
+                                body={`${attentionCount} products currently have Low or Medium health.`}
                                 tone={attentionCount > 0 ? 'critical' : 'success'}
                                 footer="Focus on these first for the fastest quality lift."
                             />
                             <InsightCard
                                 title="Score Distribution"
-                                body={`Critical ${stats?.critical_priority_products || 0} • High ${stats?.high_priority_products || 0} • Medium ${stats?.medium_priority_products || 0} • Low ${stats?.low_priority_products || 0}`}
+                                body={`Low ${stats?.low_health_products || 0} • Medium ${stats?.medium_health_products || 0} • High ${stats?.high_health_products || 0} • Excellent ${stats?.excellent_health_products || 0}`}
                                 footer="Based on the latest score calculation."
                             />
                             <InsightCard

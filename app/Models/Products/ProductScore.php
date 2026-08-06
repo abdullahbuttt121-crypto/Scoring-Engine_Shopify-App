@@ -3,6 +3,7 @@
 namespace App\Models\Products;
 
 use App\Models\User;
+use App\Support\ScoringConfig;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -22,10 +23,13 @@ use Illuminate\Database\Eloquent\Model;
 class ProductScore extends Model
 {
     // Score level constants — use these in code, not raw strings
-    const LEVEL_CRITICAL = 'critical'; // 101+
-    const LEVEL_HIGH     = 'high';     // 61–100
-    const LEVEL_MEDIUM   = 'medium';   // 31–60
-    const LEVEL_LOW      = 'low';      // 0–30
+    const LEVEL_EXCELLENT = 'excellent'; // 90+
+
+    const LEVEL_HIGH = 'high';     // 61–89
+
+    const LEVEL_MEDIUM = 'medium';   // 31–60
+
+    const LEVEL_LOW = 'low';      // 0–30
 
     protected $fillable = [
         'shop_id',
@@ -37,9 +41,9 @@ class ProductScore extends Model
     ];
 
     protected $casts = [
-        'score'          => 'integer',
+        'score' => 'integer',
         'reason_summary' => 'array',    // JSON → PHP array automatically
-        'calculated_at'  => 'datetime',
+        'calculated_at' => 'datetime',
     ];
 
     // ── Relationships ────────────────────────────────────────────────────────
@@ -98,9 +102,6 @@ class ProductScore extends Model
      */
     public static function levelFromScore(int $score): string
     {
-        if ($score >= 101) return self::LEVEL_CRITICAL;
-        if ($score >= 61)  return self::LEVEL_HIGH;
-        if ($score >= 31)  return self::LEVEL_MEDIUM;
-        return self::LEVEL_LOW;
+        return ScoringConfig::levelFromScore($score);
     }
 }

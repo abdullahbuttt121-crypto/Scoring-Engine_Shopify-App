@@ -6,6 +6,7 @@ use App\Models\Products\Product;
 use App\Models\Products\ProductScore;
 use App\Models\Products\ProductScoreLog;
 use App\Models\User;
+use App\Support\ScoringConfig;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -31,10 +32,10 @@ class DashboardStatsController extends Controller
      * {
      *   "data": {
      *     "total_products":               150,
-     *     "critical_priority_products":   5,
-     *     "high_priority_products":       30,
-     *     "medium_priority_products":     60,
-     *     "low_priority_products":        55,
+     *     "low_health_products":          5,
+     *     "medium_health_products":       30,
+     *     "high_health_products":         60,
+     *     "excellent_health_products":    55,
      *     "unscored_products":            0,
      *     "average_score":                42,
      *     "last_sync_time":               "2026-05-13T10:00:00Z",
@@ -61,10 +62,12 @@ class DashboardStatsController extends Controller
         //   score_breakdown = []     → scored, but zero rules matched (score = 0)
         // The four level counts exclude unscored products (score_breakdown IS NULL)
         // so they don't inflate the "Low" bucket with fresh-synced products.
-        $criticalCount = (clone $base)->where('score', '>', 100)->whereNotNull('score_breakdown')->count();
-        $highCount     = (clone $base)->whereBetween('score', [61, 100])->whereNotNull('score_breakdown')->count();
-        $mediumCount   = (clone $base)->whereBetween('score', [31, 60])->whereNotNull('score_breakdown')->count();
-        $lowCount      = (clone $base)->where('score', '<=', 30)->whereNotNull('score_breakdown')->count();
+        $levelCounts = [];
+        foreach (array_keys(ScoringConfig::levels()) as $level) {
+            $levelQuery = clone $base;
+            ScoringConfig::applyLevelRange($levelQuery, $level);
+            $levelCounts[$level] = $levelQuery->whereNotNull('score_breakdown')->count();
+        }
 
         // Products that exist but have never been scored yet
         $unscoredCount = (clone $base)->whereNull('score_breakdown')->count();
@@ -104,7 +107,8 @@ class DashboardStatsController extends Controller
         foreach ($reasonRows as $row) {
             $reasons = is_array($row->score_breakdown) ? $row->score_breakdown : [];
             foreach ($reasons as $reason) {
-                $clean = trim((string) preg_replace('/\s*\[[^\]]+\]\s*$/', '', (string) $reason));
+                $rawReason = is_array($reason) ? ($reason['reason'] ?? $reason['label'] ?? '') : $reason;
+                $clean = trim((string) preg_replace('/\s*\[[^\]]+\]\s*$/', '', (string) $rawReason));
                 if ($clean === '') {
                     continue;
                 }
@@ -117,25 +121,27 @@ class DashboardStatsController extends Controller
             ->take(5)
             ->map(fn ($count, $reason) => [
                 'reason' => $reason,
-                'count'  => $count,
+                'count' => $count,
             ])
             ->values()
             ->all();
 
         return response()->json([
             'data' => [
-                'total_products'              => $totalProducts,
-                'critical_priority_products'  => $criticalCount,
-                'high_priority_products'      => $highCount,
-                'medium_priority_products'    => $mediumCount,
-                'low_priority_products'       => $lowCount,
-                'unscored_products'           => $unscoredCount,
-                'out_of_stock_products'       => $outOfStockCount,
-                'low_inventory_products'      => $lowInventoryCount,
-                'top_scoring_reasons'         => $topReasons,
-                'average_score'              => $averageScore,
+                'total_products' => $totalProducts,
+                'low_health_products' => $levelCounts['low'] ?? 0,
+                'medium_health_products' => $levelCounts['medium'] ?? 0,
+                'high_health_products' => $levelCounts['high'] ?? 0,
+                'excellent_health_products' => $levelCounts['excellent'] ?? 0,
+                'score_levels' => $levelCounts,
+                'scoring_config' => ScoringConfig::frontend(),
+                'unscored_products' => $unscoredCount,
+                'out_of_stock_products' => $outOfStockCount,
+                'low_inventory_products' => $lowInventoryCount,
+                'top_scoring_reasons' => $topReasons,
+                'average_score' => $averageScore,
                 // Format as ISO 8601 string, or null if never synced/scored
-                'last_sync_time'              => $lastSyncTime
+                'last_sync_time' => $lastSyncTime
                     ? \Illuminate\Support\Carbon::parse($lastSyncTime)->toISOString()
                     : null,
                 'last_score_calculation_time' => $lastScoreTime

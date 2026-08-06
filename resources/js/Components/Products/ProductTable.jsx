@@ -13,14 +13,8 @@ import { ImageIcon, RefreshIcon, ViewIcon } from '@shopify/polaris-icons';
 import { useCallback, useState } from 'react';
 import PriorityBadge from '@/Components/Scoring/PriorityBadge';
 import ScoreIndicator from '@/Components/Scoring/ScoreIndicator';
+import { levelFromScore, reasonText } from '@/Config/scoring';
 
-function levelFromScore(score) {
-    if (score === null || score === undefined) return null;
-    if (score > 100) return 'critical';
-    if (score >= 61) return 'high';
-    if (score >= 31) return 'medium';
-    return 'low';
-}
 
 function formatDate(isoString) {
     if (!isoString) return '-';
@@ -105,7 +99,7 @@ export default function ProductTable({
     const rowMarkup = (products || []).map((product, index) => {
         const score = product.score;
         const level = product.score_info?.level || (score !== null ? levelFromScore(score) : null);
-        const topReason = (product.score_breakdown || product.score_info?.reasons || [])[0] || null;
+        const topReason = reasonText((product.score_breakdown || product.score_info?.reasons || [])[0]);
 
         return (
             <IndexTable.Row

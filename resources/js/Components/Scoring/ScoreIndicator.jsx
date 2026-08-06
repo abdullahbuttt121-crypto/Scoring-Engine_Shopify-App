@@ -1,19 +1,5 @@
 import { InlineStack, Text } from '@shopify/polaris';
-
-const LEVEL_BAR_COLOR = {
-    critical: '#d72c0d',
-    high: '#e08b00',
-    medium: '#f3c94b',
-    low: '#21a67a',
-};
-
-function levelFromScore(score) {
-    if (score === null || score === undefined) return null;
-    if (score > 100) return 'critical';
-    if (score >= 61) return 'high';
-    if (score >= 31) return 'medium';
-    return 'low';
-}
+import { levelFromScore, scoreLevelMeta } from '@/Config/scoring';
 
 export default function ScoreIndicator({ score, compact = false }) {
     if (score === null || score === undefined) {
@@ -21,7 +7,7 @@ export default function ScoreIndicator({ score, compact = false }) {
     }
 
     const level = levelFromScore(score);
-    const color = LEVEL_BAR_COLOR[level] || '#8c9196';
+    const color = scoreLevelMeta(level).color;
     const width = Math.min(score, 100);
 
     return (
@@ -46,7 +32,7 @@ export default function ScoreIndicator({ score, compact = false }) {
                 />
             </div>
             <Text variant="bodyMd" as="span" fontWeight="semibold">
-                {score}%
+                {score} pts
             </Text>
         </InlineStack>
     );

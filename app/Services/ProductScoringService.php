@@ -6,6 +6,7 @@ use App\Models\Products\Product;
 use App\Models\Products\ProductScore;
 use App\Models\Products\ProductScoreLog;
 use App\Models\ScoringRule;
+use App\Support\ScoringConfig;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
 
@@ -18,9 +19,9 @@ use Illuminate\Support\Facades\Log;
  * 1. Receives a Product model.
  * 2. Loads all active scoring rules that apply to that shop.
  * 3. Checks each rule against the product's data (price, inventory, status, etc.)
- * 4. Adds the rule's points to the total score when the condition matches.
+ * 4. Deducts the rule's points from the 100-point health score when its full condition tree matches.
  * 5. Builds a list of human-readable reasons ("Low inventory: 8 units").
- * 6. Determines the score level (low / medium / high / critical).
+ * 6. Determines the health level (low / medium / high / excellent).
  * 7. Saves/updates the product_scores row for this product.
  * 8. Appends a new row to product_score_logs (audit trail).
  * 9. Caches the score back onto the products table (denormalized).
@@ -29,22 +30,22 @@ use Illuminate\Support\Facades\Log;
  * ─────────────────────────────────────────────────────────────────────────────
  * SCORE LEVELS
  * ─────────────────────────────────────────────────────────────────────────────
- *   0  – 30  → low      (products that need no immediate attention)
- *   31 – 60  → medium   (products that may need attention soon)
- *   61 – 100 → high     (products that need attention)
- *   101+     → critical (products that need urgent action)
+ *   0  – 30  → low       (red; highest attention priority)
+ *   31 – 60  → medium    (yellow)
+ *   61 – 89  → high      (brown)
+ *   90+      → excellent (green)
  *
  * ─────────────────────────────────────────────────────────────────────────────
  * SUPPORTED OPERATORS
  * ─────────────────────────────────────────────────────────────────────────────
-     *   equals          → product value exactly matches the rule's condition_value
-     *   not_equals      → product value does NOT match the rule's condition_value
-     *   less_than       → product value is numerically less than condition_value
-     *   greater_than    → product value is numerically greater than condition_value
-     *   older_than_days → product was last updated more than N days ago
-     *   empty           → product field is null, empty string, or zero
-     *   not_empty       → product field has a non-empty value
-     *   contains        → product field contains the condition_value as a substring
+ *   equals          → product value exactly matches the rule's condition_value
+ *   not_equals      → product value does NOT match the rule's condition_value
+ *   less_than       → product value is numerically less than condition_value
+ *   greater_than    → product value is numerically greater than condition_value
+ *   older_than_days → product was last updated more than N days ago
+ *   empty           → product field is null, empty string, or zero
+ *   not_empty       → product field has a non-empty value
+ *   contains        → product field contains the condition_value as a substring
  */
 class ProductScoringService
 {
@@ -55,18 +56,18 @@ class ProductScoringService
     /**
      * Score a single product and persist the results.
      *
-     * @param  Product $product  The product to score
+     * @param  Product  $product  The product to score
      * @param  string  $trigger  What caused this scoring run
      *                           Use ProductScoreLog::TRIGGER_* constants.
      *                           Default: 'manual'
-     * @return array  [
-     *     'product_id'   => int,
-     *     'score'        => int,
-     *     'level'        => string,
-     *     'reasons'      => array,
-     *     'old_score'    => int|null,
-     *     'score_changed'=> bool,
-     * ]
+     * @return array [
+     *               'product_id'   => int,
+     *               'score'        => int,
+     *               'level'        => string,
+     *               'reasons'      => array,
+     *               'old_score'    => int|null,
+     *               'score_changed'=> bool,
+     *               ]
      */
     public function scoreProduct(Product $product, string $trigger = ProductScoreLog::TRIGGER_MANUAL): array
     {
@@ -82,9 +83,9 @@ class ProductScoringService
 
         // Step 2 — Run all rules and build the score breakdown
         $calculation = $this->calculateScore($product, $rules);
-        $newScore    = $calculation['score'];
-        $level       = $this->getScoreLevel($newScore);
-        $reasons     = $calculation['reasons'];
+        $newScore = $calculation['score'];
+        $level = $this->getScoreLevel($newScore);
+        $reasons = $calculation['reasons'];
 
         // Step 3 — Read the old score (for the change log and the "changed" flag)
         $existingScore = ProductScore::where('product_id', $product->id)
@@ -97,46 +98,46 @@ class ProductScoringService
         $productScore = ProductScore::updateOrCreate(
             // MATCH: find the existing row for this shop + product
             [
-                'shop_id'    => $product->user_id,
+                'shop_id' => $product->user_id,
                 'product_id' => $product->id,
             ],
             // SET / UPDATE
             [
-                'score'          => $newScore,
-                'score_level'    => $level,
+                'score' => $newScore,
+                'score_level' => $level,
                 'reason_summary' => $reasons,      // cast to JSON automatically
-                'calculated_at'  => now(),
+                'calculated_at' => now(),
             ]
         );
 
         // Step 5 — Update the denormalized cache on the products row itself
         // This allows the dashboard to sort/filter by score without joining product_scores.
         $product->update([
-            'score'           => $newScore,
+            'score' => $newScore,
             'score_breakdown' => $reasons,    // cast to JSON automatically
         ]);
 
         // Step 6 — Append a log entry (always insert, never update)
         // We log even if the score didn't change so the audit trail is complete.
         ProductScoreLog::create([
-            'shop_id'       => $product->user_id,
-            'product_id'    => $product->id,
-            'old_score'     => $oldScore,
-            'new_score'     => $newScore,
-            'reasons'       => $reasons,           // cast to JSON automatically
+            'shop_id' => $product->user_id,
+            'product_id' => $product->id,
+            'old_score' => $oldScore,
+            'new_score' => $newScore,
+            'reasons' => $reasons,           // cast to JSON automatically
             'calculated_by' => $trigger,
         ]);
 
         $scoreChanged = $oldScore !== $newScore;
 
-        Log::info("[ProductScoring] Done. Score: {$newScore} ({$level}). Changed: " . ($scoreChanged ? 'yes' : 'no'));
+        Log::info("[ProductScoring] Done. Score: {$newScore} ({$level}). Changed: ".($scoreChanged ? 'yes' : 'no'));
 
         return [
-            'product_id'    => $product->id,
-            'score'         => $newScore,
-            'level'         => $level,
-            'reasons'       => $reasons,
-            'old_score'     => $oldScore,
+            'product_id' => $product->id,
+            'score' => $newScore,
+            'level' => $level,
+            'reasons' => $reasons,
+            'old_score' => $oldScore,
             'score_changed' => $scoreChanged,
         ];
     }
@@ -157,33 +158,86 @@ class ProductScoringService
      *   3. If yes → add the rule's points to the running total.
      *   4. Build a readable reason string and add it to the reasons list.
      *
-     * @param  Product    $product
-     * @param  \Illuminate\Support\Collection $rules
+     * @param  \Illuminate\Support\Collection  $rules
      * @return array ['score' => int, 'reasons' => array]
      */
     private function calculateScore(Product $product, $rules): array
     {
-        $totalScore = 0;
-        $reasons    = [];
+        $totalScore = ScoringConfig::baseScore();
+        $reasons = [];
 
         foreach ($rules as $rule) {
             // Get the product's actual value for this rule type
             // e.g. for rule_type = 'inventory' → returns $product->inventory_quantity (e.g. 8)
-            $productValue = $this->getProductValueByRuleType($product, $rule->rule_type);
+            $evaluation = $this->evaluateConditionNode($product, $rule->effectiveConditionTree(), $rule->rule_key);
 
             // Check if the product value satisfies this rule's condition
-            if ($this->ruleMatches($rule, $productValue)) {
+            if ($evaluation['matched']) {
                 // Rule matched → add points and record the reason
-                $totalScore += $rule->points;
-                $reasons[]   = $this->buildReason($rule, $productValue);
+                $totalScore -= $rule->points;
+                $reasons[] = $this->buildRuleReason($rule, $evaluation['conditions']);
 
-                Log::debug("[ProductScoring] Rule '{$rule->rule_key}' matched. +{$rule->points} pts. Total: {$totalScore}");
+                Log::debug("[ProductScoring] Rule '{$rule->rule_key}' matched. Health impact: -{$rule->points}. Total: {$totalScore}");
             }
         }
 
         return [
-            'score'   => $totalScore,
+            'score' => max(0, min(65535, $totalScore)),
             'reasons' => $reasons,
+        ];
+    }
+
+    private function evaluateConditionNode(Product $product, array $node, string $ruleKey): array
+    {
+        if (($node['node_type'] ?? 'condition') === 'group') {
+            $results = array_map(
+                fn (array $child) => $this->evaluateConditionNode($product, $child, $ruleKey),
+                $node['children'] ?? []
+            );
+            $matches = array_column($results, 'matched');
+            $matched = ($node['combinator'] ?? 'all') === 'any'
+                ? in_array(true, $matches, true)
+                : ! in_array(false, $matches, true);
+
+            return [
+                'matched' => $matched,
+                'conditions' => array_merge(...array_map(fn ($result) => $result['conditions'], $results)),
+            ];
+        }
+
+        $type = (string) ($node['rule_type'] ?? '');
+        $operator = (string) ($node['operator'] ?? '');
+        $expected = $node['value'] ?? null;
+        $actual = $this->getProductValueByRuleType($product, $type);
+
+        return [
+            'matched' => $this->conditionMatches($operator, $expected, $actual, $ruleKey),
+            'conditions' => [[
+                'rule_type' => $type,
+                'operator' => $operator,
+                'expected' => $expected,
+                'actual' => $actual,
+            ]],
+        ];
+    }
+
+    private function buildRuleReason(ScoringRule $rule, array $conditions): array
+    {
+        $conditionText = collect($conditions)->map(function (array $condition) {
+            $value = in_array($condition['operator'], [ScoringRule::OP_EMPTY, ScoringRule::OP_NOT_EMPTY], true)
+                ? '' : ' '.(string) $condition['expected'];
+
+            return "{$condition['rule_type']} {$condition['operator']}{$value}";
+        })->implode('; ');
+
+        return [
+            'rule_key' => $rule->rule_key,
+            'label' => $rule->rule_name,
+            'health_impact' => -$rule->points,
+            'reason' => "{$rule->rule_name}: {$conditionText}",
+            'conditions' => $conditions,
+            'action_type' => $rule->action_type,
+            'recommendation' => $rule->recommendation,
         ];
     }
 
@@ -193,8 +247,8 @@ class ProductScoringService
      * Thresholds:
      *   0  – 30  → low
      *   31 – 60  → medium
-     *   61 – 100 → high
-     *   101+     → critical
+     *   61 – 89  → high
+     *   90+      → excellent
      */
     private function getScoreLevel(int $score): string
     {
@@ -212,15 +266,11 @@ class ProductScoringService
      *   older_than_days→ same as greater_than but semantically: "product not updated for N days"
      *   empty          → catches missing data (no image, no description, no tags)
      *
-     * @param  ScoringRule $rule
-     * @param  mixed       $productValue  The extracted product field value
-     * @return bool
+     * @param  ScoringRule  $rule
+     * @param  mixed  $productValue  The extracted product field value
      */
-    private function ruleMatches(ScoringRule $rule, mixed $productValue): bool
+    private function conditionMatches(string $operator, mixed $conditionValue, mixed $productValue, string $ruleKey): bool
     {
-        $operator       = $rule->condition_operator;
-        $conditionValue = $rule->condition_value;
-
         switch ($operator) {
 
             case ScoringRule::OP_EQUALS:
@@ -259,7 +309,7 @@ class ProductScoringService
             case ScoringRule::OP_NOT_EMPTY:
                 // Opposite of empty — product field has a real value
                 // e.g. rule: vendor not_empty  →  product->vendor = "Nike" ✓
-                return !empty($productValue) && !(is_string($productValue) && trim($productValue) === '');
+                return ! empty($productValue) && ! (is_string($productValue) && trim($productValue) === '');
 
             case ScoringRule::OP_CONTAINS:
                 // Check if the product field contains the condition value as a substring
@@ -267,6 +317,7 @@ class ProductScoringService
                 if (empty($conditionValue)) {
                     return false;
                 }
+
                 return str_contains(
                     strtolower((string) $productValue),
                     strtolower((string) $conditionValue)
@@ -274,7 +325,8 @@ class ProductScoringService
 
             default:
                 // Unknown operator — skip this rule rather than crashing
-                Log::warning("[ProductScoring] Unknown operator '{$operator}' in rule '{$rule->rule_key}'. Skipping.");
+                Log::warning("[ProductScoring] Unknown operator '{$operator}' in rule '{$ruleKey}'. Skipping.");
+
                 return false;
         }
     }
@@ -296,9 +348,7 @@ class ProductScoringService
      *   description → $product->body_html           (string HTML or null/empty)
      *   vendor      → $product->vendor              (string or null)
      *
-     * @param  Product $product
      * @param  string  $ruleType  One of the ScoringRule::TYPE_* constants
-     * @return mixed
      */
     private function getProductValueByRuleType(Product $product, string $ruleType): mixed
     {
@@ -319,6 +369,7 @@ class ProductScoringService
                 if (empty($product->shopify_updated_at)) {
                     return 0;
                 }
+
                 // Carbon::parse handles both datetime strings and existing Carbon instances.
                 // diffInDays() returns a positive integer.
                 return (int) Carbon::parse($product->shopify_updated_at)->diffInDays(now());
@@ -337,6 +388,7 @@ class ProductScoringService
 
             default:
                 Log::warning("[ProductScoring] Unknown rule_type '{$ruleType}'. Returning null.");
+
                 return null;
         }
     }
@@ -355,9 +407,7 @@ class ProductScoringService
      *   "Status is draft [+15 pts]"
      *   "Missing featured image [+15 pts]"
      *
-     * @param  ScoringRule $rule
-     * @param  mixed       $productValue  The actual value from the product
-     * @return string
+     * @param  mixed  $productValue  The actual value from the product
      */
     private function buildReason(ScoringRule $rule, mixed $productValue): string
     {
@@ -369,7 +419,8 @@ class ProductScoringService
                 return "Low/zero inventory ({$productValue} units) [{$pts}]";
 
             case ScoringRule::TYPE_PRICE:
-                $formatted = is_numeric($productValue) ? '$' . number_format((float) $productValue, 2) : $productValue;
+                $formatted = is_numeric($productValue) ? '$'.number_format((float) $productValue, 2) : $productValue;
+
                 return "Price {$rule->condition_operator} \${$rule->condition_value} (actual: {$formatted}) [{$pts}]";
 
             case ScoringRule::TYPE_RECENCY:

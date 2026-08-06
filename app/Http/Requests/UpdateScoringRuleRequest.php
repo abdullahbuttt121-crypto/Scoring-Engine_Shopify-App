@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\ScoringRule;
+use App\Support\RuleConditionTree;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -46,22 +47,29 @@ class UpdateScoringRuleRequest extends FormRequest
         ];
 
         return [
-            'rule_name'          => ['sometimes', 'string', 'max:100'],
-            'rule_type'          => ['sometimes', Rule::in($validTypes)],
+            'rule_name' => ['sometimes', 'string', 'max:100'],
+            'rule_type' => ['sometimes', Rule::in($validTypes)],
             'condition_operator' => ['sometimes', Rule::in($validOperators)],
-            'condition_value'    => ['sometimes', 'nullable', 'string', 'max:255'],
-            'points'             => ['sometimes', 'integer', 'between:-10000,10000'],
-            'is_active'          => ['sometimes', 'boolean'],
-            'sort_order'         => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'condition_value' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'points' => ['sometimes', 'integer', 'between:-10000,10000'],
+            'condition_tree' => ['sometimes', 'array', function ($attribute, $value, $fail) {
+                if ($error = RuleConditionTree::validationError($value)) {
+                    $fail($error);
+                }
+            }],
+            'action_type' => ['sometimes', 'nullable', Rule::in(array_keys(config('scoring.actions', [])))],
+            'recommendation' => ['sometimes', 'nullable', 'string', 'max:1000'],
+            'is_active' => ['sometimes', 'boolean'],
+            'sort_order' => ['sometimes', 'nullable', 'integer', 'min:0'],
         ];
     }
 
     public function messages(): array
     {
         return [
-            'rule_type.in'          => 'Rule type must be one of: status, price, inventory, recency, tags, vendor, image, description.',
+            'rule_type.in' => 'Rule type must be one of: status, price, inventory, recency, tags, vendor, image, description.',
             'condition_operator.in' => 'Condition operator must be one of: equals, not_equals, greater_than, less_than, empty, not_empty, contains, older_than_days.',
-            'points.between'        => 'Points must be between -10,000 and 10,000.',
+            'points.between' => 'Points must be between -10,000 and 10,000.',
         ];
     }
 }
