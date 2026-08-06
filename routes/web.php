@@ -59,7 +59,6 @@ Route::group(['middleware' => ['verify.embedded', 'verify.shopify']], function (
         $user = auth()->user();
         $shop = $user->api()->rest('GET', '/admin/api/2025-04/webhooks.json');
         return response()->json(['webhook' => $shop]);
-        
     })->name('webhook');
 
 });
